@@ -4,26 +4,10 @@ import re
 from typing import List, Tuple, Union, Dict, Any
 import time
 import torch
-import numpy as np
-import librosa
-import librosa.effects
 
 from vibevoice.modular.modeling_vibevoice_inference import VibeVoiceForConditionalGenerationInference
 from vibevoice.processor.vibevoice_processor import VibeVoiceProcessor
 from transformers.utils import logging
-
-# Import configuration
-from .config import (
-    MODEL_CONFIG,
-    GENERATION_CONFIG,
-    AUDIO_CONFIG,
-    INFERENCE_CONFIG,
-    ADVANCED_CONFIG,
-    get_model_path,
-    get_device,
-    get_torch_dtype,
-    validate_config,
-)
 
 logging.set_verbosity_info()
 logger = logging.get_logger(__name__)
@@ -156,65 +140,46 @@ def parse_args():
     parser.add_argument(
         "--model_path",
         type=str,
-        default=None,
-        help=f"Path to the HuggingFace model directory (default: {get_model_path()})",
+        default="microsoft/VibeVoice-1.5b",
+        help="Path to the HuggingFace model directory",
     )
     
     parser.add_argument(
         "--txt_path",
         type=str,
-        default=INFERENCE_CONFIG["default_txt_path"],
-        help=f"Path to the txt file containing the script (default: {INFERENCE_CONFIG['default_txt_path']})",
+        default="demo/text_examples/1p_abs.txt",
+        help="Path to the txt file containing the script",
     )
     parser.add_argument(
         "--speaker_names",
         type=str,
         nargs='+',
-        default=INFERENCE_CONFIG["default_speaker_names"],
-        help=f"Speaker names in order (default: {INFERENCE_CONFIG['default_speaker_names']})",
+        default='Andrew',
+        help="Speaker names in order (e.g., --speaker_names Andrew Ava 'Bill Gates')",
     )
     parser.add_argument(
         "--output_dir",
         type=str,
-        default=INFERENCE_CONFIG["default_output_dir"],
-        help=f"Directory to save output audio files (default: {INFERENCE_CONFIG['default_output_dir']})",
+        default="./outputs",
+        help="Directory to save output audio files",
     )
     parser.add_argument(
         "--device",
         type=str,
-        default=None,
-        help=f"Device for inference (default: {get_device()})",
+        default="cuda" if torch.cuda.is_available() else "cpu",
+        help="Device for tensor tests",
     )
     parser.add_argument(
         "--cfg_scale",
         type=float,
-        default=None,
-        help=f"CFG (Classifier-Free Guidance) scale for generation (default: {GENERATION_CONFIG['cfg_scale']})",
-    )
-    parser.add_argument(
-        "--speech_rate",
-        type=float,
-        default=None,
-        help=f"Speech rate multiplier (1.0 = normal, 0.5 = half speed, 2.0 = double speed) (default: {GENERATION_CONFIG['speech_rate']})",
-    )
-    parser.add_argument(
-        "--inference_steps",
-        type=int,
-        default=None,
-        help=f"Number of DDPM inference steps (default: {GENERATION_CONFIG['ddpm_inference_steps']})",
+        default=1.3,
+        help="CFG (Classifier-Free Guidance) scale for generation (default: 1.3)",
     )
     
     return parser.parse_args()
 
 def main():
     args = parse_args()
-    
-    # Validate config
-    try:
-        validate_config()
-    except ValueError as e:
-        print(f"⚠️  Config validation warning: {e}")
-        print("   Continuing with current config values...")
 
     # Initialize voice mapper
     voice_mapper = VoiceMapper()
@@ -274,37 +239,20 @@ def main():
     # Prepare data for model
     full_script = '\n'.join(scripts)
     
-    # Use config defaults if not provided via args
-    model_path = args.model_path or get_model_path()
-    device = args.device or get_device()
-    cfg_scale = args.cfg_scale if args.cfg_scale is not None else GENERATION_CONFIG["cfg_scale"]
-    speech_rate = args.speech_rate if args.speech_rate is not None else GENERATION_CONFIG["speech_rate"]
-    inference_steps = args.inference_steps if args.inference_steps is not None else GENERATION_CONFIG["ddpm_inference_steps"]
-    
     # Load processor
-    print(f"Loading processor & model from {model_path}")
-    processor = VibeVoiceProcessor.from_pretrained(model_path)
+    print(f"Loading processor & model from {args.model_path}")
+    processor = VibeVoiceProcessor.from_pretrained(args.model_path)
 
-    # Load model with config settings
-    torch_dtype = get_torch_dtype()
-    attn_impl = MODEL_CONFIG["attn_implementation"] if MODEL_CONFIG["attn_implementation"] else None
-    
+    # Load model
     model = VibeVoiceForConditionalGenerationInference.from_pretrained(
-        model_path,
-        torch_dtype=torch_dtype,
-        device_map=MODEL_CONFIG["device_map"],
-        attn_implementation=attn_impl
+        args.model_path,
+        torch_dtype=torch.bfloat16,
+        device_map='cuda',
+        attn_implementation="flash_attention_2" # we only test flash_attention_2
     )
 
     model.eval()
-    
-    # Configure noise scheduler
-    model.model.noise_scheduler = model.model.noise_scheduler.from_config(
-        model.model.noise_scheduler.config,
-        algorithm_type=MODEL_CONFIG["algorithm_type"],
-        beta_schedule=MODEL_CONFIG["beta_schedule"]
-    )
-    model.set_ddpm_inference_steps(num_steps=inference_steps)
+    model.set_ddpm_inference_steps(num_steps=10)
 
     if hasattr(model.model, 'language_model'):
        print(f"Language model attention: {model.model.language_model.config._attn_implementation}")
@@ -317,38 +265,26 @@ def main():
         return_tensors="pt",
         return_attention_mask=True,
     )
-    print(f"Starting generation with cfg_scale: {cfg_scale}")
-    print(f"Using inference steps: {inference_steps}")
-    print(f"Speech rate: {speech_rate}x")
+    print(f"Starting generation with cfg_scale: {args.cfg_scale}")
 
     # Generate audio
     start_time = time.time()
-    
-    gen_config = {
-        'do_sample': GENERATION_CONFIG["do_sample"],
-    }
-    if GENERATION_CONFIG["temperature"] is not None:
-        gen_config['temperature'] = GENERATION_CONFIG["temperature"]
-    if GENERATION_CONFIG["top_p"] is not None:
-        gen_config['top_p'] = GENERATION_CONFIG["top_p"]
-    if GENERATION_CONFIG["top_k"] is not None:
-        gen_config['top_k'] = GENERATION_CONFIG["top_k"]
-    
     outputs = model.generate(
         **inputs,
         max_new_tokens=None,
-        cfg_scale=cfg_scale,
+        cfg_scale=args.cfg_scale,
         tokenizer=processor.tokenizer,
-        generation_config=gen_config,
-        verbose=GENERATION_CONFIG["verbose"],
-        refresh_negative=GENERATION_CONFIG["refresh_negative"],
+        # generation_config={'do_sample': False, 'temperature': 0.95, 'top_p': 0.95, 'top_k': 0},
+        generation_config={'do_sample': False},
+        verbose=True,
     )
     generation_time = time.time() - start_time
     print(f"Generation time: {generation_time:.2f} seconds")
     
     # Calculate audio duration and additional metrics
     if outputs.speech_outputs and outputs.speech_outputs[0] is not None:
-        sample_rate = AUDIO_CONFIG["sample_rate"]
+        # Assuming 24kHz sample rate (common for speech synthesis)
+        sample_rate = 24000
         audio_samples = outputs.speech_outputs[0].shape[-1] if len(outputs.speech_outputs[0].shape) > 0 else len(outputs.speech_outputs[0])
         audio_duration = audio_samples / sample_rate
         rtf = generation_time / audio_duration if audio_duration > 0 else float('inf')
@@ -367,42 +303,13 @@ def main():
     print(f"Generated tokens: {generated_tokens}")
     print(f"Total tokens: {output_tokens}")
 
-    # Apply speech rate adjustment if needed
-    audio_output = outputs.speech_outputs[0]
-    sample_rate = AUDIO_CONFIG["sample_rate"]
-    
-    if speech_rate != 1.0 and AUDIO_CONFIG["enable_speech_rate"]:
-        print(f"Adjusting speech rate to {speech_rate:.2f}x...")
-        # Convert to numpy if tensor
-        if torch.is_tensor(audio_output):
-            audio_np = audio_output.float().cpu().numpy()
-        else:
-            audio_np = np.array(audio_output)
-        
-        # Ensure 1D
-        if len(audio_np.shape) > 1:
-            audio_np = audio_np.squeeze()
-        
-        # Apply time-stretching
-        try:
-            audio_np = librosa.effects.time_stretch(audio_np, rate=speech_rate)
-            # Convert back to tensor if needed
-            if torch.is_tensor(audio_output):
-                audio_output = torch.from_numpy(audio_np).float()
-            else:
-                audio_output = audio_np
-            print(f"Speech rate adjusted successfully")
-        except Exception as e:
-            print(f"Warning: Failed to adjust speech rate: {e}. Using original audio.")
-    
     # Save output
     txt_filename = os.path.splitext(os.path.basename(args.txt_path))[0]
     output_path = os.path.join(args.output_dir, f"{txt_filename}_generated.wav")
-    if INFERENCE_CONFIG["auto_create_output_dir"]:
-        os.makedirs(args.output_dir, exist_ok=True)
+    os.makedirs(args.output_dir, exist_ok=True)
     
     processor.save_audio(
-        audio_output,  # First (and only) batch item
+        outputs.speech_outputs[0],  # First (and only) batch item
         output_path=output_path,
     )
     print(f"Saved output to {output_path}")
@@ -411,13 +318,8 @@ def main():
     print("\n" + "="*50)
     print("GENERATION SUMMARY")
     print("="*50)
-    print("\n" + "="*50)
-    print("GENERATION SUMMARY")
-    print("="*50)
     print(f"Input file: {args.txt_path}")
     print(f"Output file: {output_path}")
-    print(f"Model path: {model_path}")
-    print(f"Device: {device}")
     print(f"Speaker names: {args.speaker_names}")
     print(f"Number of unique speakers: {len(set(speaker_numbers))}")
     print(f"Number of segments: {len(scripts)}")
@@ -427,10 +329,6 @@ def main():
     print(f"Generation time: {generation_time:.2f} seconds")
     print(f"Audio duration: {audio_duration:.2f} seconds")
     print(f"RTF (Real Time Factor): {rtf:.2f}x")
-    print(f"Inference steps: {inference_steps}")
-    print(f"CFG scale: {cfg_scale}")
-    print(f"Speech rate: {speech_rate:.2f}x")
-    print("="*50)
     
     print("="*50)
 
