@@ -73,6 +73,7 @@ class PodcastGenerator:
         speaker_3: str,
         speaker_4: str,
         cfg_scale: float,
+        speech_rate: float,
         remove_silence: bool,
         progress=gr.Progress()
     ) -> Iterator[Tuple]:
@@ -178,6 +179,10 @@ class PodcastGenerator:
                     # Trim silence if requested
                     if remove_silence:
                         audio_np = self.audio_processor.trim_silence_from_numpy(audio_np, sample_rate)
+                    
+                    # Apply speech rate if not 1.0
+                    if speech_rate != 1.0:
+                        audio_np = self.audio_processor.change_speech_rate(audio_np, speech_rate, sample_rate)
                     
                     duration = len(audio_np) / sample_rate
                     audio_file.write((audio_np * 32767).astype(np.int16))

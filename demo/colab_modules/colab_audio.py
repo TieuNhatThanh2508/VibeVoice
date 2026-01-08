@@ -93,6 +93,35 @@ class AudioProcessor:
         samples = np.array(combined.get_array_of_samples())
         return samples.astype(np.float32) / 32767.0
     
+    def change_speech_rate(self, audio_np: np.ndarray, speech_rate: float, sample_rate: int = None) -> np.ndarray:
+        """
+        Change speech rate of audio (tốc độ nói)
+        
+        Args:
+            audio_np: Audio data as numpy array
+            speech_rate: Speech rate multiplier (1.0 = normal, >1.0 = faster, <1.0 = slower)
+            sample_rate: Sample rate, defaults to config
+        
+        Returns:
+            np.ndarray: Audio with changed speech rate
+        """
+        if sample_rate is None:
+            sample_rate = self.sample_rate
+        
+        if speech_rate == 1.0:
+            # No change needed
+            return audio_np
+        
+        try:
+            # Use librosa's time_stretch to change speed without changing pitch
+            # time_stretch uses phase vocoder
+            audio_stretched = librosa.effects.time_stretch(audio_np, rate=speech_rate)
+            return audio_stretched
+        except Exception as e:
+            print(f"Error changing speech rate: {e}")
+            # Fallback: return original audio
+            return audio_np
+    
     def save_audio(self, audio_np: np.ndarray, output_path: str, sample_rate: int = None):
         """
         Save audio numpy array to file
