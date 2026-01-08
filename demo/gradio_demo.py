@@ -907,17 +907,15 @@ def create_demo_interface(demo_instance: VibeVoiceDemo):
     ) as interface:
         
         # Theme toggle button
+        print("[DEBUG] Creating theme toggle button and state")
         theme_state = gr.State(value="light")
         theme_toggle_btn = gr.Button(
             "🌙",
             elem_classes="theme-toggle-btn",
             size="sm"
         )
-        theme_toggle_btn = gr.Button(
-            "🌙",
-            elem_classes="theme-toggle-btn",
-            size="sm"
-        )
+        print(f"[DEBUG] theme_toggle_btn created: {theme_toggle_btn}")
+        print(f"[DEBUG] theme_state created: {theme_state}")
         
         # Header
         gr.HTML("""
@@ -927,8 +925,25 @@ def create_demo_interface(demo_instance: VibeVoiceDemo):
         </div>
         """)
         
-        # JavaScript for theme toggle (from ui_styles module)
-        gr.HTML(THEME_TOGGLE_JS)
+        # JavaScript for theme toggle (from ui_styles module) with debug logging
+        theme_js_with_debug = THEME_TOGGLE_JS.replace(
+            "window.toggleVibeVoiceTheme = function(currentTheme) {",
+            """window.toggleVibeVoiceTheme = function(currentTheme) {
+                console.log('[DEBUG] toggleVibeVoiceTheme called with currentTheme:', currentTheme);
+            """
+        ).replace(
+            "const newTheme = currentTheme === 'light' ? 'dark' : 'light';",
+            """const newTheme = currentTheme === 'light' ? 'dark' : 'light';
+                console.log('[DEBUG] toggleVibeVoiceTheme: newTheme =', newTheme);
+            """
+        ).replace(
+            "localStorage.setItem('vibevoice-theme', newTheme);",
+            """localStorage.setItem('vibevoice-theme', newTheme);
+                console.log('[DEBUG] Theme saved to localStorage:', newTheme);
+            """
+        )
+        gr.HTML(theme_js_with_debug)
+        print("[DEBUG] Theme toggle JavaScript loaded with debug logging")
         
         # Main layout with sidebar
         # Container for sidebar overlay
@@ -936,15 +951,20 @@ def create_demo_interface(demo_instance: VibeVoiceDemo):
         
         with gr.Row():
             # Sidebar toggle button (fixed position)
+            print("[DEBUG] Creating sidebar toggle button and state")
             sidebar_visible = gr.State(value=False)
             sidebar_toggle_btn = gr.Button(
                 "⚙️",
                 elem_classes="sidebar-toggle-btn",
                 size="sm"
             )
+            print(f"[DEBUG] sidebar_toggle_btn created: {sidebar_toggle_btn}")
+            print(f"[DEBUG] sidebar_visible created: {sidebar_visible}")
             
             # Sidebar with advanced settings - full height overlay
+            print("[DEBUG] Creating sidebar Column component")
             with gr.Column(scale=1, visible=False, elem_classes="sidebar-container", elem_id="sidebar") as sidebar:
+                print(f"[DEBUG] sidebar Column created: {sidebar}")
                 gr.Markdown("### ⚙️ **Advanced Settings**")
                 
                 # Speech Rate
@@ -1242,12 +1262,22 @@ def create_demo_interface(demo_instance: VibeVoiceDemo):
                 )
         
         # Sidebar toggle function
-        # Theme toggle function
+        # Theme toggle function with debug logging
         def toggle_theme(current_theme):
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"[DEBUG] toggle_theme called with current_theme: {current_theme}")
+            print(f"[DEBUG] toggle_theme called with current_theme: {current_theme}")
+            
             new_theme = "dark" if current_theme == "light" else "light"
             icon = "☀️" if new_theme == "dark" else "🌙"
+            
+            logger.info(f"[DEBUG] toggle_theme returning: new_theme={new_theme}, icon={icon}")
+            print(f"[DEBUG] toggle_theme returning: new_theme={new_theme}, icon={icon}")
+            
             return gr.update(value=icon), new_theme
         
+        print("[DEBUG] Setting up theme_toggle_btn.click handler")
         theme_toggle_btn.click(
             fn=toggle_theme,
             inputs=[theme_state],
@@ -1255,20 +1285,47 @@ def create_demo_interface(demo_instance: VibeVoiceDemo):
             queue=False
         ).then(
             fn=None,
-            js="(theme) => { window.toggleVibeVoiceTheme(theme); return []; }",
+            js=f"""
+            (theme) => {{
+                console.log('[DEBUG] Theme toggle JS called with theme:', theme);
+                if (window.toggleVibeVoiceTheme) {{
+                    const result = window.toggleVibeVoiceTheme(theme);
+                    console.log('[DEBUG] toggleVibeVoiceTheme result:', result);
+                    return [];
+                }} else {{
+                    console.error('[DEBUG] toggleVibeVoiceTheme function not found!');
+                    return [];
+                }}
+            }}
+            """,
             inputs=[theme_state]
         )
+        print("[DEBUG] Theme toggle handler setup complete")
         
-        # Sidebar toggle function
+        # Sidebar toggle function with debug logging
         def toggle_sidebar(visible):
-            return gr.update(visible=not visible), not visible
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"[DEBUG] toggle_sidebar called with visible: {visible}")
+            print(f"[DEBUG] toggle_sidebar called with visible: {visible}")
+            
+            new_visible = not visible
+            logger.info(f"[DEBUG] toggle_sidebar returning: new_visible={new_visible}")
+            print(f"[DEBUG] toggle_sidebar returning: new_visible={new_visible}")
+            
+            return gr.update(visible=new_visible), new_visible
         
+        print("[DEBUG] Setting up sidebar_toggle_btn.click handler")
+        print(f"[DEBUG] sidebar_toggle_btn: {sidebar_toggle_btn}")
+        print(f"[DEBUG] sidebar: {sidebar}")
+        print(f"[DEBUG] sidebar_visible: {sidebar_visible}")
         sidebar_toggle_btn.click(
             fn=toggle_sidebar,
             inputs=[sidebar_visible],
             outputs=[sidebar, sidebar_visible],
             queue=False
         )
+        print("[DEBUG] Sidebar toggle handler setup complete")
         
         # Conditional visibility updates
         def update_bgm_volume_visibility(enable_bgm):
