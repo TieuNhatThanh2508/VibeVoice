@@ -104,7 +104,7 @@ def create_prompt_builder_ui():
                         gr.Textbox(
                             label=f"Speaker {i+1} Name",
                             visible=(i < 2),
-                            placeholder=config.prompt_builder.speaker_name_placeholder.format(i=i+1)
+                            placeholder=config.prompt_builder.speaker_name_placeholder.replace("{i+1}", str(i+1))
                         )
                         for i in range(4)
                     ]

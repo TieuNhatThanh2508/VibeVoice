@@ -19,7 +19,8 @@ class VoiceManager:
             base_dir: Base directory for demo files, defaults to demo/
         """
         if base_dir is None:
-            base_dir = os.path.dirname(__file__)
+            # Get demo/ directory (parent of colab_modules/)
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         
         self.voices_dir = os.path.join(base_dir, config.file.voices_dir)
         self.voice_presets: Dict[str, str] = {}
