@@ -97,7 +97,8 @@ def create_settings_column(voice_manager: VoiceManager, audio_processor) -> tupl
                 maximum=config.model.cfg_scale_max,
                 value=config.model.default_cfg_scale,
                 step=config.model.cfg_scale_step,
-                label="CFG Scale"
+                label="CFG Scale (Classifier-Free Guidance)",
+                info="Điều khiển mức độ tuân thủ text. 1.0 = tự nhiên, >1.3 = tuân thủ tốt hơn nhưng có thể cứng hơn. Mặc định: 1.3"
             )
             speech_rate = gr.Slider(
                 minimum=config.audio.speech_rate_min,

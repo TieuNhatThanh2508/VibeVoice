@@ -112,13 +112,30 @@ class AudioProcessor:
             # No change needed
             return audio_np
         
+        # Validate input
+        if audio_np is None or len(audio_np) == 0:
+            print("Warning: Empty audio input for speech rate change, returning original")
+            return audio_np
+        
+        # Validate speech_rate range (librosa time_stretch works best in 0.25-4.0 range)
+        if speech_rate < 0.25 or speech_rate > 4.0:
+            print(f"Warning: Speech rate {speech_rate} is outside recommended range (0.25-4.0), clamping to valid range")
+            speech_rate = max(0.25, min(4.0, speech_rate))
+        
         try:
             # Use librosa's time_stretch to change speed without changing pitch
             # time_stretch uses phase vocoder
             audio_stretched = librosa.effects.time_stretch(audio_np, rate=speech_rate)
+            
+            # Validate output
+            if audio_stretched is None or len(audio_stretched) == 0:
+                print("Warning: Speech rate change resulted in empty audio, returning original")
+                return audio_np
+            
             return audio_stretched
         except Exception as e:
-            print(f"Error changing speech rate: {e}")
+            print(f"Error changing speech rate to {speech_rate}: {e}")
+            print(f"Audio shape: {audio_np.shape if audio_np is not None else 'None'}")
             # Fallback: return original audio
             return audio_np
     

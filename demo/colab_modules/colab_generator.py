@@ -154,38 +154,69 @@ class PodcastGenerator:
                     text_content = match.group(2).strip()
                     
                     if not (0 <= speaker_idx < len(voice_samples)):
+                        print(f"Warning: Invalid speaker index {speaker_idx} for line {i+1}, skipping...")
                         continue
                     
-                    # Generate audio for this line
-                    inputs = self.model_manager.processor(
-                        text=[line],
-                        voice_samples=[voice_samples[speaker_idx]],
-                        padding=True,
-                        return_tensors="pt"
-                    )
-                    
-                    output_waveform = self.model_manager.model.generate(
-                        **inputs,
-                        max_new_tokens=None,
-                        cfg_scale=cfg_scale,
-                        tokenizer=self.model_manager.processor.tokenizer,
-                        generation_config=self.model_manager.get_generation_config(),
-                        verbose=config.model.verbose,
-                        refresh_negative=config.model.refresh_negative
-                    )
-                    
-                    audio_np = output_waveform.speech_outputs[0].cpu().float().numpy().squeeze()
-                    
-                    # Trim silence if requested
-                    if remove_silence:
-                        audio_np = self.audio_processor.trim_silence_from_numpy(audio_np, sample_rate)
-                    
-                    # Apply speech rate if not 1.0
-                    if speech_rate != 1.0:
-                        audio_np = self.audio_processor.change_speech_rate(audio_np, speech_rate, sample_rate)
-                    
-                    duration = len(audio_np) / sample_rate
-                    audio_file.write((audio_np * 32767).astype(np.int16))
+                    try:
+                        # Generate audio for this line
+                        inputs = self.model_manager.processor(
+                            text=[line],
+                            voice_samples=[voice_samples[speaker_idx]],
+                            padding=True,
+                            return_tensors="pt"
+                        )
+                        
+                        output_waveform = self.model_manager.model.generate(
+                            **inputs,
+                            max_new_tokens=None,
+                            cfg_scale=cfg_scale,
+                            tokenizer=self.model_manager.processor.tokenizer,
+                            generation_config=self.model_manager.get_generation_config(),
+                            verbose=config.model.verbose,
+                            refresh_negative=config.model.refresh_negative
+                        )
+                        
+                        if not output_waveform or not output_waveform.speech_outputs or len(output_waveform.speech_outputs) == 0:
+                            print(f"Error: No speech output generated for line {i+1}, skipping...")
+                            continue
+                        
+                        audio_np = output_waveform.speech_outputs[0].cpu().float().numpy().squeeze()
+                        
+                        # Validate generated audio
+                        if audio_np is None or len(audio_np) == 0:
+                            print(f"Warning: Empty audio generated for line {i+1}, skipping...")
+                            continue
+                        
+                        # Trim silence if requested
+                        if remove_silence:
+                            audio_np = self.audio_processor.trim_silence_from_numpy(audio_np, sample_rate)
+                            # Check if audio is still valid after trimming
+                            if audio_np is None or len(audio_np) == 0:
+                                print(f"Warning: Audio became empty after trimming for line {i+1}, skipping...")
+                                continue
+                        
+                        # Apply speech rate if not 1.0
+                        if speech_rate != 1.0:
+                            original_length = len(audio_np)
+                            audio_np = self.audio_processor.change_speech_rate(audio_np, speech_rate, sample_rate)
+                            # Check if audio is still valid after rate change
+                            if audio_np is None or len(audio_np) == 0:
+                                print(f"Warning: Audio became empty after speech rate change for line {i+1}, skipping...")
+                                continue
+                        
+                        duration = len(audio_np) / sample_rate
+                        if duration <= 0:
+                            print(f"Warning: Invalid duration {duration} for line {i+1}, skipping...")
+                            continue
+                        
+                        audio_file.write((audio_np * 32767).astype(np.int16))
+                        
+                    except Exception as e:
+                        print(f"Error generating audio for line {i+1}: {e}")
+                        import traceback
+                        traceback.print_exc()
+                        # Continue with next line instead of crashing
+                        continue
                     
                     timestamps[str(i + 1)] = {
                         "text": text_content,
