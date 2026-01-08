@@ -58,6 +58,8 @@ def create_settings_column(voice_manager: VoiceManager, audio_processor) -> tupl
         
         for i in range(4):
             val = defaults[i] if i < len(defaults) and defaults[i] in available_voices else None
+            
+            # Create speaker dropdown
             speaker = gr.Dropdown(
                 choices=available_voices,
                 value=val,
@@ -66,12 +68,15 @@ def create_settings_column(voice_manager: VoiceManager, audio_processor) -> tupl
             )
             speaker_selections.append(speaker)
             
-            # Add preview audio component for each speaker
+            # Add preview audio component right after each speaker dropdown
             preview_audio = gr.Audio(
                 label=f"🎵 Preview Voice {i+1}",
                 visible=(i < 2),
                 interactive=False,
-                type="filepath"
+                type="filepath",
+                show_label=True,
+                show_download_button=False,
+                autoplay=False
             )
             voice_previews.append(preview_audio)
         
@@ -228,12 +233,19 @@ def create_demo_interface(generator: PodcastGenerator, voice_manager: VoiceManag
         
         def preview_voice(voice_name):
             """Preview selected voice"""
-            if not voice_name or voice_name not in voice_manager.available_voices:
+            if not voice_name:
+                return None
+            
+            if voice_name not in voice_manager.available_voices:
+                print(f"Warning: Voice '{voice_name}' not found in available voices")
                 return None
             
             voice_path = voice_manager.get_voice_path(voice_name)
             if voice_path and os.path.exists(voice_path):
+                print(f"Preview voice: {voice_name} -> {voice_path}")
                 return voice_path
+            else:
+                print(f"Warning: Voice file not found: {voice_path}")
             return None
         
         def load_random_example():
@@ -264,12 +276,23 @@ def create_demo_interface(generator: PodcastGenerator, voice_manager: VoiceManag
         )
         
         # Connect voice preview for each speaker dropdown
-        for speaker_dropdown, preview_audio in zip(speaker_selections, voice_previews):
+        for idx, (speaker_dropdown, preview_audio) in enumerate(zip(speaker_selections, voice_previews)):
+            # When dropdown changes, update preview
             speaker_dropdown.change(
                 fn=preview_voice,
                 inputs=speaker_dropdown,
                 outputs=preview_audio
             )
+            
+            # Load initial preview if default value exists and is visible
+            if idx < 2 and speaker_dropdown.value:
+                # Use load event to trigger preview on page load
+                interface.load(
+                    fn=preview_voice,
+                    inputs=speaker_dropdown,
+                    outputs=preview_audio,
+                    queue=False
+                )
         
         process_upload_btn.click(
             fn=process_and_refresh_voices,
