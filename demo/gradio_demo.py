@@ -31,8 +31,10 @@ from transformers import set_seed
 # Import configuration
 from .config import (
     MODEL_CONFIG,
+    MODEL_PATHS,
     GENERATION_CONFIG,
     AUDIO_CONFIG,
+    BGM_CONFIG,
     GRADIO_CONFIG,
     ADVANCED_CONFIG,
     get_model_path,
@@ -55,9 +57,21 @@ class VibeVoiceDemo:
         self.is_generating = False  # Track generation state
         self.stop_generation = False  # Flag to stop generation
         self.current_streamer = None  # Track current audio streamer
+        
+        # Determine current model name from model_path
+        self.current_model_name = None
+        for name, path in MODEL_PATHS.items():
+            if path == self.model_path:
+                self.current_model_name = name
+                break
+        if self.current_model_name is None:
+            # Default to 1.5B if not found
+            self.current_model_name = "1.5B"
+        
         self.load_model()
         self.setup_voice_presets()
         self.load_example_scripts()  # Load example scripts
+        self.setup_bgm_files()  # Setup BGM files
         
     def load_model(self):
         """Load the VibeVoice model and processor."""
@@ -90,6 +104,145 @@ class VibeVoiceDemo:
         
         if hasattr(self.model.model, 'language_model'):
             print(f"Language model attention: {self.model.model.language_model.config._attn_implementation}")
+    
+    def switch_model(self, model_name: str):
+        """Switch to a different model dynamically."""
+        if self.current_model_name == model_name:
+            return  # Already using this model
+        
+        if self.is_generating:
+            raise gr.Error("Cannot switch model while generation is in progress. Please stop generation first.")
+        
+        print(f"Switching model from {self.current_model_name} to {model_name}...")
+        
+        # Unload current model
+        if hasattr(self, 'model') and self.model is not None:
+            del self.model
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        
+        if hasattr(self, 'processor') and self.processor is not None:
+            del self.processor
+        
+        # Load new model
+        if model_name not in MODEL_PATHS:
+            raise ValueError(f"Unknown model name: {model_name}. Available: {list(MODEL_PATHS.keys())}")
+        
+        self.model_path = MODEL_PATHS[model_name]
+        self.current_model_name = model_name
+        
+        # Reload model and processor
+        self.load_model()
+        print(f"Successfully switched to model: {model_name}")
+    
+    def setup_bgm_files(self):
+        """Setup BGM files by scanning the voices directory."""
+        voices_dir = os.path.join(os.path.dirname(__file__), "voices")
+        self.bgm_files = []
+        
+        if not os.path.exists(voices_dir):
+            return
+        
+        # Look for BGM files (files with 'bgm' in name or separate BGM directory)
+        wav_files = [f for f in os.listdir(voices_dir) 
+                    if f.lower().endswith(('.wav', '.mp3', '.flac', '.ogg', '.m4a', '.aac')) 
+                    and os.path.isfile(os.path.join(voices_dir, f))]
+        
+        # Filter for BGM files (contain 'bgm' in filename)
+        bgm_files = [f for f in wav_files if 'bgm' in f.lower()]
+        
+        for bgm_file in bgm_files:
+            full_path = os.path.join(voices_dir, bgm_file)
+            if os.path.exists(full_path):
+                self.bgm_files.append(full_path)
+        
+        # If no BGM files found, use first available voice file as fallback
+        if not self.bgm_files and wav_files:
+            # Use first voice file as default BGM (not ideal but works)
+            default_bgm = os.path.join(voices_dir, wav_files[0])
+            self.bgm_files.append(default_bgm)
+            print(f"Warning: No BGM files found. Using {wav_files[0]} as default BGM.")
+        else:
+            print(f"Found {len(self.bgm_files)} BGM file(s)")
+    
+    def get_bgm_file(self) -> Optional[str]:
+        """Get the default BGM file path."""
+        if self.bgm_files:
+            return self.bgm_files[0]  # Use first available BGM file
+        return BGM_CONFIG.get("default_bgm_file")
+    
+    def mix_bgm(self, audio: np.ndarray, bgm_file: Optional[str], bgm_volume: float, sample_rate: int) -> np.ndarray:
+        """
+        Mix background music with audio output.
+        
+        Args:
+            audio: Main audio waveform as numpy array
+            bgm_file: Path to BGM file (if None, uses default)
+            bgm_volume: Volume of BGM (0.0 to 1.0)
+            sample_rate: Sample rate of the audio
+            
+        Returns:
+            Mixed audio with BGM
+        """
+        if bgm_volume <= 0.0 or bgm_file is None:
+            return audio
+        
+        try:
+            # Get BGM file if not provided
+            if bgm_file is None:
+                bgm_file = self.get_bgm_file()
+            
+            if bgm_file is None or not os.path.exists(bgm_file):
+                print(f"Warning: BGM file not found: {bgm_file}. Skipping BGM mixing.")
+                return audio
+            
+            # Load BGM
+            bgm_audio = self.read_audio(bgm_file, target_sr=sample_rate)
+            
+            if len(bgm_audio) == 0:
+                print("Warning: Failed to load BGM. Skipping BGM mixing.")
+                return audio
+            
+            # Ensure audio is float32 and normalized
+            if audio.dtype != np.float32:
+                audio = audio.astype(np.float32)
+                if audio.max() > 1.0 or audio.min() < -1.0:
+                    audio = audio / np.max(np.abs(audio))
+            
+            if bgm_audio.dtype != np.float32:
+                bgm_audio = bgm_audio.astype(np.float32)
+                if bgm_audio.max() > 1.0 or bgm_audio.min() < -1.0:
+                    bgm_audio = bgm_audio / np.max(np.abs(bgm_audio))
+            
+            # Match BGM length to audio length
+            audio_len = len(audio)
+            bgm_len = len(bgm_audio)
+            
+            if bgm_len < audio_len:
+                # Loop BGM if shorter
+                num_loops = int(np.ceil(audio_len / bgm_len))
+                bgm_audio = np.tile(bgm_audio, num_loops)
+            
+            # Trim BGM if longer
+            if len(bgm_audio) > audio_len:
+                bgm_audio = bgm_audio[:audio_len]
+            
+            # Mix audio with BGM
+            # Normalize both to prevent clipping
+            mixed_audio = audio + (bgm_audio * bgm_volume)
+            
+            # Normalize to prevent clipping
+            max_val = np.max(np.abs(mixed_audio))
+            if max_val > 1.0:
+                mixed_audio = mixed_audio / max_val
+            
+            return mixed_audio.astype(np.float32)
+            
+        except Exception as e:
+            print(f"Error mixing BGM: {e}")
+            import traceback
+            traceback.print_exc()
+            return audio  # Return original audio on error
     
     def setup_voice_presets(self):
         """Setup voice presets by scanning the voices directory."""
@@ -145,6 +298,35 @@ class VibeVoiceDemo:
             print(f"Error reading audio {audio_path}: {e}")
             return np.array([])
     
+    def preview_voice(self, speaker_name: Optional[str]) -> Optional[tuple]:
+        """
+        Preview a voice sample.
+        
+        Args:
+            speaker_name: Name of the speaker to preview
+            
+        Returns:
+            Tuple of (sample_rate, audio_data) or None if speaker not found
+        """
+        if not speaker_name or speaker_name not in self.available_voices:
+            return None
+        
+        try:
+            audio_path = self.available_voices[speaker_name]
+            audio_data = self.read_audio(audio_path, target_sr=AUDIO_CONFIG["sample_rate"])
+            
+            if len(audio_data) == 0:
+                return None
+            
+            # Convert to 16-bit for Gradio
+            audio_16bit = convert_to_16_bit_wav(audio_data)
+            sample_rate = AUDIO_CONFIG["sample_rate"]
+            
+            return (sample_rate, audio_16bit)
+        except Exception as e:
+            print(f"Error previewing voice {speaker_name}: {e}")
+            return None
+    
     def adjust_speech_rate(self, audio: np.ndarray, sample_rate: int, rate: float) -> np.ndarray:
         """
         Adjust speech rate using time-stretching (changes speed without changing pitch).
@@ -176,13 +358,48 @@ class VibeVoiceDemo:
                                  speaker_2: str = None,
                                  speaker_3: str = None,
                                  speaker_4: str = None,
+                                 model_name: str = "1.5B",
                                  cfg_scale: float = 1.3,
-                                 speech_rate: float = 1.0) -> Iterator[tuple]:
+                                 speech_rate: float = 1.0,
+                                 enable_bgm: bool = False,
+                                 bgm_volume: float = 0.3,
+                                 ddpm_inference_steps: int = 10,
+                                 do_sample: bool = False,
+                                 temperature: Optional[float] = None,
+                                 top_p: Optional[float] = None,
+                                 top_k: Optional[int] = None,
+                                 refresh_negative: bool = True,
+                                 verbose: bool = False,
+                                 normalize_audio: bool = True,
+                                 target_dB_FS: float = -25,
+                                 seed: Optional[int] = None) -> Iterator[tuple]:
         try:
             
             # Reset stop flag and set generating state
             self.stop_generation = False
             self.is_generating = True
+            
+            # Set seed if provided
+            if seed is not None:
+                set_seed(seed)
+            
+            # Switch model if needed
+            if model_name != self.current_model_name:
+                try:
+                    self.switch_model(model_name)
+                except gr.Error as e:
+                    self.is_generating = False
+                    yield None, None, f"❌ Model switch error: {str(e)}", gr.update(visible=False)
+                    return
+                except Exception as e:
+                    self.is_generating = False
+                    yield None, None, f"❌ Failed to switch model: {str(e)}", gr.update(visible=False)
+                    return
+            
+            # Update inference steps if changed
+            if ddpm_inference_steps != self.inference_steps:
+                self.inference_steps = ddpm_inference_steps
+                self.model.set_ddpm_inference_steps(num_steps=self.inference_steps)
             
             # Validate inputs
             if not script.strip():
@@ -190,7 +407,7 @@ class VibeVoiceDemo:
                 raise gr.Error("Error: Please provide a script.")
 
             # Defend against common mistake
-            script = script.replace("’", "'")
+            script = script.replace("'", "'")
             
             if num_speakers < 1 or num_speakers > 4:
                 self.is_generating = False
@@ -284,7 +501,7 @@ class VibeVoiceDemo:
             # Start generation in a separate thread
             generation_thread = threading.Thread(
                 target=self._generate_with_streamer,
-                args=(inputs, cfg_scale, audio_streamer, speech_rate)
+                args=(inputs, cfg_scale, audio_streamer, speech_rate, do_sample, temperature, top_p, top_k, refresh_negative, verbose)
             )
             generation_thread.start()
             
@@ -436,14 +653,35 @@ class VibeVoiceDemo:
             # Prepare the complete audio
             if all_audio_chunks:
                 complete_audio = np.concatenate(all_audio_chunks)
-                # Apply speech rate to complete audio if not already applied to chunks
-                # (Note: if we applied to chunks, we don't need to apply again)
-                # But for consistency, we'll apply to the final concatenated audio
+                # Convert to float32 for processing
+                complete_audio_float = complete_audio.astype(np.float32) / 32767.0
+                
+                # Apply speech rate adjustment
                 if speech_rate != 1.0:
-                    # Convert back to float32 for processing
-                    complete_audio_float = complete_audio.astype(np.float32) / 32767.0
                     complete_audio_float = self.adjust_speech_rate(complete_audio_float, sample_rate, speech_rate)
-                    complete_audio = convert_to_16_bit_wav(complete_audio_float)
+                
+                # Apply BGM mixing if enabled
+                if enable_bgm:
+                    bgm_file = self.get_bgm_file()
+                    complete_audio_float = self.mix_bgm(complete_audio_float, bgm_file, bgm_volume, sample_rate)
+                
+                # Normalize audio if enabled
+                if normalize_audio:
+                    # Normalize to target dB level
+                    rms = np.sqrt(np.mean(complete_audio_float**2))
+                    if rms > 0:
+                        target_linear = 10 ** (target_dB_FS / 20.0)
+                        current_linear = rms
+                        if current_linear > 0:
+                            gain = target_linear / current_linear
+                            complete_audio_float = complete_audio_float * gain
+                            # Prevent clipping
+                            max_val = np.max(np.abs(complete_audio_float))
+                            if max_val > 1.0:
+                                complete_audio_float = complete_audio_float / max_val
+                
+                # Convert back to 16-bit
+                complete_audio = convert_to_16_bit_wav(complete_audio_float)
                 final_duration = len(complete_audio) / sample_rate
                 
                 final_log = log + f"⏱️ Generation completed in {generation_time:.2f} seconds\n"
@@ -475,7 +713,9 @@ class VibeVoiceDemo:
             traceback.print_exc()
             yield None, None, error_msg, gr.update(visible=False)
     
-    def _generate_with_streamer(self, inputs, cfg_scale, audio_streamer, speech_rate=1.0):
+    def _generate_with_streamer(self, inputs, cfg_scale, audio_streamer, speech_rate=1.0, 
+                               do_sample=False, temperature=None, top_p=None, top_k=None, 
+                               refresh_negative=True, verbose=False):
         """Helper method to run generation with streamer in a separate thread."""
         try:
             # Check for stop signal before starting generation
@@ -488,14 +728,15 @@ class VibeVoiceDemo:
                 return self.stop_generation
                 
             gen_config = {
-                'do_sample': GENERATION_CONFIG["do_sample"],
+                'do_sample': do_sample,
             }
-            if GENERATION_CONFIG["temperature"] is not None:
-                gen_config['temperature'] = GENERATION_CONFIG["temperature"]
-            if GENERATION_CONFIG["top_p"] is not None:
-                gen_config['top_p'] = GENERATION_CONFIG["top_p"]
-            if GENERATION_CONFIG["top_k"] is not None:
-                gen_config['top_k'] = GENERATION_CONFIG["top_k"]
+            if do_sample:
+                if temperature is not None:
+                    gen_config['temperature'] = temperature
+                if top_p is not None:
+                    gen_config['top_p'] = top_p
+                if top_k is not None:
+                    gen_config['top_k'] = top_k
             
             outputs = self.model.generate(
                 **inputs,
@@ -505,8 +746,8 @@ class VibeVoiceDemo:
                 generation_config=gen_config,
                 audio_streamer=audio_streamer,
                 stop_check_fn=check_stop_generation,  # Pass the stop check function
-                verbose=GENERATION_CONFIG["verbose"],
-                refresh_negative=GENERATION_CONFIG["refresh_negative"],
+                verbose=verbose,
+                refresh_negative=refresh_negative,
             )
             
         except Exception as e:
@@ -810,6 +1051,43 @@ def create_demo_interface(demo_instance: VibeVoiceDemo):
         box-shadow: 0 6px 25px rgba(100, 116, 139, 0.4);
         background: linear-gradient(135deg, #475569 0%, #334155 100%);
     }
+    
+    /* Sidebar styling */
+    .sidebar-container {
+        background: rgba(255, 255, 255, 0.95);
+        backdrop-filter: blur(10px);
+        border-right: 1px solid rgba(226, 232, 240, 0.8);
+        border-radius: 0 16px 16px 0;
+        padding: 1.5rem;
+        box-shadow: 2px 0 10px rgba(0, 0, 0, 0.1);
+        transition: all 0.3s ease;
+        max-height: calc(100vh - 200px);
+        overflow-y: auto;
+    }
+    
+    .sidebar-toggle-btn {
+        background: linear-gradient(135deg, #64748b 0%, #475569 100%);
+        border: none;
+        border-radius: 8px 0 0 8px;
+        padding: 0.75rem 1rem;
+        color: white;
+        font-weight: 600;
+        font-size: 0.9rem;
+        box-shadow: 2px 0 10px rgba(100, 116, 139, 0.3);
+        transition: all 0.3s ease;
+        position: sticky;
+        top: 0;
+        z-index: 10;
+    }
+    
+    .sidebar-toggle-btn:hover {
+        background: linear-gradient(135deg, #475569 0%, #334155 100%);
+        transform: translateX(-2px);
+    }
+    
+    .main-content-area {
+        padding: 1rem;
+    }
     """
     
     with gr.Blocks(
@@ -830,10 +1108,163 @@ def create_demo_interface(demo_instance: VibeVoiceDemo):
         </div>
         """)
         
+        # Main layout with sidebar
         with gr.Row():
-            # Left column - Settings
-            with gr.Column(scale=1, elem_classes="settings-card"):
-                gr.Markdown("### 🎛️ **Podcast Settings**")
+            # Sidebar toggle button (fixed position)
+            sidebar_visible = gr.State(value=False)
+            sidebar_toggle_btn = gr.Button(
+                "⚙️",
+                elem_classes="sidebar-toggle-btn",
+                size="sm"
+            )
+            
+            # Sidebar with advanced settings
+            with gr.Column(scale=1, visible=False, elem_classes="sidebar-container") as sidebar:
+                gr.Markdown("### ⚙️ **Advanced Settings**")
+                
+                # Speech Rate
+                speech_rate = gr.Slider(
+                    minimum=GENERATION_CONFIG["speech_rate_min"],
+                    maximum=GENERATION_CONFIG["speech_rate_max"],
+                    value=GENERATION_CONFIG["speech_rate"],
+                    step=GENERATION_CONFIG["speech_rate_step"],
+                    label="Speech Rate",
+                    info="1.0 = normal, 0.5 = half, 2.0 = double",
+                    elem_classes="slider-container"
+                )
+                
+                # BGM Settings
+                enable_bgm = gr.Checkbox(
+                    label="Enable Background Music",
+                    value=BGM_CONFIG["enable_bgm"]
+                )
+                
+                bgm_volume = gr.Slider(
+                    minimum=BGM_CONFIG["bgm_volume_min"],
+                    maximum=BGM_CONFIG["bgm_volume_max"],
+                    value=BGM_CONFIG["bgm_volume"],
+                    step=BGM_CONFIG["bgm_volume_step"],
+                    label="BGM Volume",
+                    visible=BGM_CONFIG["enable_bgm"],
+                    elem_classes="slider-container"
+                )
+                
+                # Generation Parameters
+                gr.Markdown("### 🎛️ **Generation Parameters**")
+                
+                cfg_scale = gr.Slider(
+                    minimum=GENERATION_CONFIG["cfg_scale_min"],
+                    maximum=GENERATION_CONFIG["cfg_scale_max"],
+                    value=GENERATION_CONFIG["cfg_scale"],
+                    step=GENERATION_CONFIG["cfg_scale_step"],
+                    label="CFG Scale",
+                    info="Higher = more adherence to text",
+                    elem_classes="slider-container"
+                )
+                
+                ddpm_inference_steps = gr.Slider(
+                    minimum=1,
+                    maximum=50,
+                    value=GENERATION_CONFIG["ddpm_inference_steps"],
+                    step=1,
+                    label="DDPM Inference Steps",
+                    info="More steps = better quality, slower",
+                    elem_classes="slider-container"
+                )
+                
+                do_sample = gr.Checkbox(
+                    label="Enable Sampling",
+                    value=GENERATION_CONFIG["do_sample"]
+                )
+                
+                temperature = gr.Slider(
+                    minimum=0.1,
+                    maximum=2.0,
+                    value=1.0,
+                    step=0.1,
+                    label="Temperature",
+                    visible=GENERATION_CONFIG["do_sample"],
+                    elem_classes="slider-container"
+                )
+                
+                top_p = gr.Slider(
+                    minimum=0.1,
+                    maximum=1.0,
+                    value=0.9,
+                    step=0.05,
+                    label="Top P",
+                    visible=GENERATION_CONFIG["do_sample"],
+                    elem_classes="slider-container"
+                )
+                
+                top_k = gr.Slider(
+                    minimum=1,
+                    maximum=100,
+                    value=50,
+                    step=1,
+                    label="Top K",
+                    visible=GENERATION_CONFIG["do_sample"],
+                    elem_classes="slider-container"
+                )
+                
+                refresh_negative = gr.Checkbox(
+                    label="Refresh Negative Prompt",
+                    value=GENERATION_CONFIG["refresh_negative"]
+                )
+                
+                verbose = gr.Checkbox(
+                    label="Verbose Output",
+                    value=GENERATION_CONFIG["verbose"]
+                )
+                
+                # Audio Processing
+                gr.Markdown("### 🎵 **Audio Processing**")
+                
+                normalize_audio = gr.Checkbox(
+                    label="Normalize Audio",
+                    value=AUDIO_CONFIG["normalize_audio"]
+                )
+                
+                target_dB_FS = gr.Slider(
+                    minimum=-40,
+                    maximum=-10,
+                    value=AUDIO_CONFIG["target_dB_FS"],
+                    step=1,
+                    label="Target dB FS",
+                    visible=AUDIO_CONFIG["normalize_audio"],
+                    elem_classes="slider-container"
+                )
+                
+                # Advanced
+                gr.Markdown("### 🔧 **Advanced**")
+                
+                seed = gr.Number(
+                    label="Random Seed",
+                    value=ADVANCED_CONFIG["seed"],
+                    precision=0,
+                    info="Set to -1 for random"
+                )
+            
+            # Main content area
+            with gr.Column(scale=3, elem_classes="main-content-area"):
+                # Model Selection
+                model_selection = gr.Dropdown(
+                    choices=list(MODEL_PATHS.keys()),
+                    value=demo_instance.current_model_name,
+                    label="Model",
+                    info="Select model size (1.5B = faster, 7B = better quality)"
+                )
+                
+                # Script Input
+                gr.Markdown("### 📝 **Script Input**")
+                
+                script_input = gr.Textbox(
+                    label="Conversation Script",
+                    placeholder=GRADIO_CONFIG["script_placeholder"],
+                    lines=12,
+                    max_lines=20,
+                    elem_classes="script-input"
+                )
                 
                 # Number of speakers
                 num_speakers = gr.Slider(
@@ -859,54 +1290,44 @@ def create_demo_interface(demo_instance: VibeVoiceDemo):
                     default_speakers = available_speaker_names[:4]
 
                 speaker_selections = []
+                speaker_preview_buttons = []
+                speaker_preview_audios = []
+                speaker_rows = []
+                
                 for i in range(4):
                     default_value = default_speakers[i] if i < len(default_speakers) else None
-                    speaker = gr.Dropdown(
-                        choices=available_speaker_names,
-                        value=default_value,
-                        label=f"Speaker {i+1}",
-                        visible=(i < 2),  # Initially show only first 2 speakers
-                        elem_classes="speaker-item"
-                    )
-                    speaker_selections.append(speaker)
-                
-                # Advanced settings
-                gr.Markdown("### ⚙️ **Advanced Settings**")
-                
-                # Sampling parameters (contains all generation settings)
-                with gr.Accordion("Generation Parameters", open=False):
-                    cfg_scale = gr.Slider(
-                        minimum=GENERATION_CONFIG["cfg_scale_min"],
-                        maximum=GENERATION_CONFIG["cfg_scale_max"],
-                        value=GENERATION_CONFIG["cfg_scale"],
-                        step=GENERATION_CONFIG["cfg_scale_step"],
-                        label="CFG Scale (Guidance Strength)",
-                        # info="Higher values increase adherence to text",
-                        elem_classes="slider-container"
+                    
+                    speaker_row = gr.Row(visible=(i < 2))  # Initially show only first 2 speakers
+                    with speaker_row:
+                        speaker = gr.Dropdown(
+                            choices=available_speaker_names,
+                            value=default_value,
+                            label=f"Speaker {i+1}",
+                            scale=4,
+                            elem_classes="speaker-item"
+                        )
+                        preview_btn = gr.Button(
+                            "🔊 Preview",
+                            size="sm",
+                            scale=1,
+                            variant="secondary",
+                            min_width=100
+                        )
+                    
+                    # Preview audio component (separate, below the row)
+                    preview_audio = gr.Audio(
+                        label=f"Preview: Speaker {i+1}",
+                        type="numpy",
+                        visible=False,
+                        show_download_button=False,
+                        autoplay=True,
+                        elem_id=f"preview_audio_{i}"
                     )
                     
-                    speech_rate = gr.Slider(
-                        minimum=GENERATION_CONFIG["speech_rate_min"],
-                        maximum=GENERATION_CONFIG["speech_rate_max"],
-                        value=GENERATION_CONFIG["speech_rate"],
-                        step=GENERATION_CONFIG["speech_rate_step"],
-                        label="Speech Rate (Speed)",
-                        info="1.0 = normal speed, 0.5 = half speed, 2.0 = double speed",
-                        elem_classes="slider-container",
-                        visible=AUDIO_CONFIG["enable_speech_rate"]
-                    )
-                
-            # Right column - Generation
-            with gr.Column(scale=2, elem_classes="generation-card"):
-                gr.Markdown("### 📝 **Script Input**")
-                
-                script_input = gr.Textbox(
-                    label="Conversation Script",
-                    placeholder=GRADIO_CONFIG["script_placeholder"],
-                    lines=12,
-                    max_lines=20,
-                    elem_classes="script-input"
-                )
+                    speaker_selections.append(speaker)
+                    speaker_preview_buttons.append(preview_btn)
+                    speaker_preview_audios.append(preview_audio)
+                    speaker_rows.append(speaker_row)
                 
                 # Button row with Random Example on the left and Generate on the right
                 with gr.Row():
@@ -995,26 +1416,109 @@ def create_demo_interface(demo_instance: VibeVoiceDemo):
                     elem_classes="log-output"
                 )
         
+        # Sidebar toggle function
+        def toggle_sidebar(visible):
+            return gr.update(visible=not visible), not visible
+        
+        sidebar_toggle_btn.click(
+            fn=toggle_sidebar,
+            inputs=[sidebar_visible],
+            outputs=[sidebar, sidebar_visible],
+            queue=False
+        )
+        
+        # Conditional visibility updates
+        def update_bgm_volume_visibility(enable_bgm):
+            return gr.update(visible=enable_bgm)
+        
+        enable_bgm.change(
+            fn=update_bgm_volume_visibility,
+            inputs=[enable_bgm],
+            outputs=[bgm_volume],
+            queue=False
+        )
+        
+        def update_sampling_params_visibility(do_sample):
+            return gr.update(visible=do_sample), gr.update(visible=do_sample), gr.update(visible=do_sample)
+        
+        do_sample.change(
+            fn=update_sampling_params_visibility,
+            inputs=[do_sample],
+            outputs=[temperature, top_p, top_k],
+            queue=False
+        )
+        
+        def update_normalize_params_visibility(normalize_audio):
+            return gr.update(visible=normalize_audio)
+        
+        normalize_audio.change(
+            fn=update_normalize_params_visibility,
+            inputs=[normalize_audio],
+            outputs=[target_dB_FS],
+            queue=False
+        )
+        
         def update_speaker_visibility(num_speakers):
-            updates = []
+            row_updates = []
+            audio_updates = []
             for i in range(4):
-                updates.append(gr.update(visible=(i < num_speakers)))
-            return updates
+                visible = (i < num_speakers)
+                row_updates.append(gr.update(visible=visible))
+                # Hide preview audio when speaker row is hidden
+                audio_updates.append(gr.update(visible=False))
+            return row_updates + audio_updates
         
         num_speakers.change(
             fn=update_speaker_visibility,
             inputs=[num_speakers],
-            outputs=speaker_selections
+            outputs=speaker_rows + speaker_preview_audios
         )
         
+        # Preview voice functions
+        def preview_voice_handler(speaker_name):
+            """Handle voice preview."""
+            if not speaker_name:
+                return gr.update(value=None, visible=False)
+            
+            preview_result = demo_instance.preview_voice(speaker_name)
+            if preview_result is None:
+                return gr.update(value=None, visible=False)
+            
+            return gr.update(value=preview_result, visible=True)
+        
+        # Connect preview buttons
+        for i in range(4):
+            speaker_preview_buttons[i].click(
+                fn=preview_voice_handler,
+                inputs=[speaker_selections[i]],
+                outputs=[speaker_preview_audios[i]],
+                queue=False
+            )
+        
         # Main generation function with streaming
-        def generate_podcast_wrapper(num_speakers, script, *speakers_and_params):
+        def generate_podcast_wrapper(model_name, num_speakers, script, *all_params):
             """Wrapper function to handle the streaming generation call."""
             try:
-                # Extract speakers and parameters
-                speakers = speakers_and_params[:4]  # First 4 are speaker selections
-                cfg_scale = speakers_and_params[4]   # CFG scale
-                speech_rate = speakers_and_params[5] if len(speakers_and_params) > 5 else 1.0  # Speech rate
+                # Extract parameters in order:
+                # all_params = [speaker_1, speaker_2, speaker_3, speaker_4, 
+                #               speech_rate, enable_bgm, bgm_volume, cfg_scale, ddpm_inference_steps,
+                #               do_sample, temperature, top_p, top_k, refresh_negative, verbose,
+                #               normalize_audio, target_dB_FS, seed]
+                speakers = all_params[:4]
+                speech_rate = all_params[4] if len(all_params) > 4 else GENERATION_CONFIG["speech_rate"]
+                enable_bgm_val = all_params[5] if len(all_params) > 5 else BGM_CONFIG["enable_bgm"]
+                bgm_volume_val = all_params[6] if len(all_params) > 6 else BGM_CONFIG["bgm_volume"]
+                cfg_scale_val = all_params[7] if len(all_params) > 7 else GENERATION_CONFIG["cfg_scale"]
+                ddpm_steps = all_params[8] if len(all_params) > 8 else GENERATION_CONFIG["ddpm_inference_steps"]
+                do_sample_val = all_params[9] if len(all_params) > 9 else GENERATION_CONFIG["do_sample"]
+                temperature_val = all_params[10] if len(all_params) > 10 else None
+                top_p_val = all_params[11] if len(all_params) > 11 else None
+                top_k_val = all_params[12] if len(all_params) > 12 else None
+                refresh_negative_val = all_params[13] if len(all_params) > 13 else GENERATION_CONFIG["refresh_negative"]
+                verbose_val = all_params[14] if len(all_params) > 14 else GENERATION_CONFIG["verbose"]
+                normalize_audio_val = all_params[15] if len(all_params) > 15 else AUDIO_CONFIG["normalize_audio"]
+                target_dB_FS_val = all_params[16] if len(all_params) > 16 else AUDIO_CONFIG["target_dB_FS"]
+                seed_val = all_params[17] if len(all_params) > 17 else ADVANCED_CONFIG["seed"]
                 
                 # Clear outputs and reset visibility at start
                 yield None, gr.update(value=None, visible=False), "🎙️ Starting generation...", gr.update(visible=True), gr.update(visible=False), gr.update(visible=True)
@@ -1029,8 +1533,21 @@ def create_demo_interface(demo_instance: VibeVoiceDemo):
                     speaker_2=speakers[1],
                     speaker_3=speakers[2],
                     speaker_4=speakers[3],
-                    cfg_scale=cfg_scale,
-                    speech_rate=speech_rate
+                    model_name=model_name,
+                    cfg_scale=cfg_scale_val,
+                    speech_rate=speech_rate,
+                    enable_bgm=enable_bgm_val,
+                    bgm_volume=bgm_volume_val,
+                    ddpm_inference_steps=int(ddpm_steps),
+                    do_sample=do_sample_val,
+                    temperature=temperature_val if do_sample_val else None,
+                    top_p=top_p_val if do_sample_val else None,
+                    top_k=int(top_k_val) if do_sample_val and top_k_val is not None else None,
+                    refresh_negative=refresh_negative_val,
+                    verbose=verbose_val,
+                    normalize_audio=normalize_audio_val,
+                    target_dB_FS=target_dB_FS_val,
+                    seed=int(seed_val) if seed_val is not None and seed_val >= 0 else None
                 ):
                     final_log = log
                     
@@ -1073,7 +1590,11 @@ def create_demo_interface(demo_instance: VibeVoiceDemo):
             queue=False
         ).then(
             fn=generate_podcast_wrapper,
-            inputs=[num_speakers, script_input] + speaker_selections + [cfg_scale, speech_rate],
+            inputs=[model_selection, num_speakers, script_input] + speaker_selections + [
+                speech_rate, enable_bgm, bgm_volume, cfg_scale, ddpm_inference_steps,
+                do_sample, temperature, top_p, top_k, refresh_negative, verbose,
+                normalize_audio, target_dB_FS, seed
+            ],
             outputs=[audio_output, complete_audio_output, log_output, streaming_status, generate_btn, stop_btn],
             queue=True  # Enable Gradio's built-in queue
         )

@@ -30,6 +30,12 @@ MODEL_CONFIG = {
     "beta_schedule": "squaredcos_cap_v2",  # Beta schedule type
 }
 
+# Model paths mapping for easy selection
+MODEL_PATHS = {
+    "1.5B": "microsoft/VibeVoice-1.5B",
+    "7B": "microsoft/VibeVoice-7B",
+}
+
 # ============================================================================
 # Generation Parameters
 # ============================================================================
@@ -79,6 +85,25 @@ AUDIO_CONFIG = {
     
     # Speech rate adjustment
     "enable_speech_rate": True,  # Enable speech rate adjustment feature
+}
+
+# ============================================================================
+# BGM Configuration
+# ============================================================================
+
+BGM_CONFIG = {
+    # Enable/disable BGM mixing
+    "enable_bgm": False,
+    
+    # BGM volume (0.0 to 1.0)
+    "bgm_volume": 0.3,
+    "bgm_volume_min": 0.0,
+    "bgm_volume_max": 1.0,
+    "bgm_volume_step": 0.05,
+    
+    # Default BGM file path (relative to demo/voices or absolute path)
+    # If None, will look for BGM files in voices directory
+    "default_bgm_file": None,
 }
 
 # ============================================================================
@@ -236,8 +261,10 @@ def validate_config():
 
 __all__ = [
     "MODEL_CONFIG",
+    "MODEL_PATHS",
     "GENERATION_CONFIG", 
     "AUDIO_CONFIG",
+    "BGM_CONFIG",
     "GRADIO_CONFIG",
     "INFERENCE_CONFIG",
     "PATHS_CONFIG",
