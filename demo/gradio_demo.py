@@ -1325,11 +1325,15 @@ def create_demo_interface(demo_instance: VibeVoiceDemo):
             logger.info(f"[DEBUG] toggle_sidebar returning: new_visible={new_visible}")
             print(f"[DEBUG] toggle_sidebar returning: new_visible={new_visible}")
             
+            # Use gr.update with explicit visible parameter
             sidebar_update = gr.update(visible=new_visible)
             print(f"[DEBUG] sidebar_update object: {sidebar_update}")
-            print(f"[DEBUG] sidebar_update.visible: {getattr(sidebar_update, 'visible', 'N/A')}")
+            print(f"[DEBUG] sidebar_update dict: {dict(sidebar_update) if hasattr(sidebar_update, '__dict__') else 'N/A'}")
             
-            return sidebar_update, new_visible
+            # Also return state update
+            state_update = new_visible
+            
+            return sidebar_update, state_update
         
         print("[DEBUG] Setting up sidebar_toggle_btn.click handler")
         print(f"[DEBUG] sidebar_toggle_btn: {sidebar_toggle_btn}")
@@ -1395,11 +1399,32 @@ def create_demo_interface(demo_instance: VibeVoiceDemo):
             js="""
             (sidebarVisible) => {
                 console.log('[DEBUG] Sidebar toggle JS callback called with sidebarVisible:', sidebarVisible);
+                console.log('[DEBUG] Type of sidebarVisible:', typeof sidebarVisible);
+                
                 setTimeout(() => {
+                    const sidebar = document.getElementById('sidebar');
+                    const sidebarWrapper = document.getElementById('sidebar-wrapper');
+                    
+                    console.log('[DEBUG] Sidebar element after toggle:', sidebar);
+                    console.log('[DEBUG] Sidebar wrapper after toggle:', sidebarWrapper);
+                    
+                    if (sidebar) {
+                        const computedStyle = window.getComputedStyle(sidebar);
+                        console.log('[DEBUG] Sidebar computed styles:');
+                        console.log('  - display:', computedStyle.display);
+                        console.log('  - visibility:', computedStyle.visibility);
+                        console.log('  - opacity:', computedStyle.opacity);
+                        console.log('  - transform:', computedStyle.transform);
+                        console.log('  - left:', computedStyle.left);
+                        console.log('  - width:', computedStyle.width);
+                        console.log('[DEBUG] Sidebar inline style:', sidebar.style.cssText);
+                        console.log('[DEBUG] Sidebar attributes:', Array.from(sidebar.attributes).map(a => a.name + '=' + a.value));
+                    }
+                    
                     if (window.debugSidebar) {
                         window.debugSidebar();
                     }
-                }, 100);
+                }, 200);
                 return [];
             }
             """,

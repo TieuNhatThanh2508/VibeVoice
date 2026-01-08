@@ -267,6 +267,20 @@ CUSTOM_CSS = """
     box-shadow: 4px 0 30px rgba(0, 0, 0, 0.15);
     transform: translateX(-100%);
     transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    /* Allow visibility to be controlled by Gradio */
+    display: block !important;
+}
+
+/* Show sidebar when visible attribute is true */
+#sidebar[style*="visible: true"],
+#sidebar:not([style*="display: none"]) {
+    transform: translateX(0) !important;
+}
+
+/* Hide sidebar when visible attribute is false or display is none */
+#sidebar[style*="visible: false"],
+#sidebar[style*="display: none"] {
+    transform: translateX(-100%) !important;
 }
 
 #sidebar.visible {
