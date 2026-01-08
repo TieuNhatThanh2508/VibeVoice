@@ -412,11 +412,18 @@ class VibeVoiceDemo:
                                  normalize_audio: bool = True,
                                  target_dB_FS: float = -25,
                                  seed: Optional[int] = None) -> Iterator[tuple]:
+        import logging
+        logger = logging.getLogger(__name__)
+        
         try:
+            print("[DEBUG] generate_podcast_streaming: Function called")
+            print(f"[DEBUG] generate_podcast_streaming: num_speakers={num_speakers}, script_length={len(script)}, model_name={model_name}")
+            logger.info("[DEBUG] generate_podcast_streaming: Function called")
             
             # Reset stop flag and set generating state
             self.stop_generation = False
             self.is_generating = True
+            print("[DEBUG] generate_podcast_streaming: Generation state set to True")
             
             # Set seed if provided
             if seed is not None:
@@ -519,6 +526,9 @@ class VibeVoiceDemo:
             
             start_time = time.time()
             
+            print("[DEBUG] generate_podcast_streaming: Processing script with processor...")
+            logger.info("[DEBUG] generate_podcast_streaming: Processing script with processor...")
+            
             inputs = self.processor(
                 text=[formatted_script],
                 voice_samples=[voice_samples],
@@ -527,25 +537,47 @@ class VibeVoiceDemo:
                 return_attention_mask=True,
             )
             
+            print(f"[DEBUG] generate_podcast_streaming: Processor inputs keys: {list(inputs.keys())}")
+            for key, value in inputs.items():
+                if torch.is_tensor(value):
+                    print(f"[DEBUG] generate_podcast_streaming: {key} shape: {value.shape}, dtype: {value.dtype}")
+                else:
+                    print(f"[DEBUG] generate_podcast_streaming: {key} type: {type(value)}")
+            logger.info(f"[DEBUG] generate_podcast_streaming: Processor inputs processed")
+            
             # Create audio streamer
+            print("[DEBUG] generate_podcast_streaming: Creating AudioStreamer...")
             audio_streamer = AudioStreamer(
                 batch_size=1,
                 stop_signal=None,
                 timeout=None
             )
+            print(f"[DEBUG] generate_podcast_streaming: AudioStreamer created: {audio_streamer}")
             
             # Store current streamer for potential stopping
             self.current_streamer = audio_streamer
+            print("[DEBUG] generate_podcast_streaming: Current streamer stored")
             
             # Start generation in a separate thread
+            print("[DEBUG] generate_podcast_streaming: Starting generation thread")
+            logger.info("[DEBUG] generate_podcast_streaming: Starting generation thread")
+            
             generation_thread = threading.Thread(
                 target=self._generate_with_streamer,
-                args=(inputs, cfg_scale, audio_streamer, speech_rate, do_sample, temperature, top_p, top_k, refresh_negative, verbose)
+                args=(inputs, cfg_scale, audio_streamer, speech_rate, do_sample, temperature, top_p, top_k, refresh_negative, verbose),
+                name="VibeVoiceGenerationThread"
             )
+            generation_thread.daemon = True  # Make thread daemon so it doesn't block shutdown
             generation_thread.start()
             
+            print(f"[DEBUG] generate_podcast_streaming: Generation thread started: {generation_thread.name}")
+            print(f"[DEBUG] generate_podcast_streaming: Thread is_alive: {generation_thread.is_alive()}")
+            logger.info(f"[DEBUG] generate_podcast_streaming: Generation thread started")
+            
             # Wait for generation to actually start producing audio
+            print("[DEBUG] generate_podcast_streaming: Waiting 1 second for generation to start...")
             time.sleep(1)  # Reduced from 3 to 1 second
+            print(f"[DEBUG] generate_podcast_streaming: After wait, thread is_alive: {generation_thread.is_alive()}")
 
             # Check for stop signal after thread start
             if self.stop_generation:
@@ -565,12 +597,29 @@ class VibeVoiceDemo:
             min_chunk_size = sample_rate * GRADIO_CONFIG["min_chunk_size_seconds"]
             
             # Get the stream for the first (and only) sample
+            print("[DEBUG] generate_podcast_streaming: Getting audio stream...")
             audio_stream = audio_streamer.get_stream(0)
+            print(f"[DEBUG] generate_podcast_streaming: Audio stream obtained: {audio_stream}")
+            print(f"[DEBUG] generate_podcast_streaming: Audio stream type: {type(audio_stream)}")
             
             has_yielded_audio = False
             has_received_chunks = False  # Track if we received any chunks at all
             
+            print("[DEBUG] generate_podcast_streaming: Starting to iterate over audio_stream...")
+            logger.info("[DEBUG] generate_podcast_streaming: Starting to iterate over audio_stream...")
+            
+            chunk_iteration_count = 0
+            last_chunk_log_time = time.time()
+            
             for audio_chunk in audio_stream:
+                chunk_iteration_count += 1
+                current_time = time.time()
+                
+                # Log every 10 chunks or every 5 seconds, whichever comes first
+                if chunk_iteration_count % 10 == 0 or chunk_iteration_count == 1 or (current_time - last_chunk_log_time) >= 5.0:
+                    print(f"[DEBUG] generate_podcast_streaming: Processing chunk #{chunk_iteration_count} (elapsed: {current_time - last_chunk_log_time:.2f}s)")
+                    logger.info(f"[DEBUG] generate_podcast_streaming: Processing chunk #{chunk_iteration_count}")
+                    last_chunk_log_time = current_time
                 # Check for stop signal in the streaming loop
                 if self.stop_generation:
                     audio_streamer.end()
@@ -641,13 +690,20 @@ class VibeVoiceDemo:
                 has_yielded_audio = True  # Mark that we yielded audio
             
             # Wait for generation to complete (with timeout to prevent hanging)
+            print("[DEBUG] generate_podcast_streaming: Waiting for generation thread to complete...")
+            print(f"[DEBUG] generate_podcast_streaming: Thread is_alive before join: {generation_thread.is_alive()}")
             generation_thread.join(timeout=5.0)  # Increased timeout to 5 seconds
+            print(f"[DEBUG] generate_podcast_streaming: Thread is_alive after join: {generation_thread.is_alive()}")
 
             # If thread is still alive after timeout, force end
             if generation_thread.is_alive():
-                print("Warning: Generation thread did not complete within timeout")
+                print("[WARNING] Generation thread did not complete within timeout")
+                logger.warning("[WARNING] Generation thread did not complete within timeout")
+                print("[DEBUG] generate_podcast_streaming: Ending audio streamer...")
                 audio_streamer.end()
+                print("[DEBUG] generate_podcast_streaming: Joining thread again with timeout...")
                 generation_thread.join(timeout=5.0)
+                print(f"[DEBUG] generate_podcast_streaming: Thread is_alive after second join: {generation_thread.is_alive()}")
 
             # Clean up
             self.current_streamer = None
@@ -756,14 +812,29 @@ class VibeVoiceDemo:
                                do_sample=False, temperature=None, top_p=None, top_k=None, 
                                refresh_negative=True, verbose=False):
         """Helper method to run generation with streamer in a separate thread."""
+        import logging
+        logger = logging.getLogger(__name__)
+        
         try:
+            print("[DEBUG] _generate_with_streamer: Starting generation thread")
+            logger.info("[DEBUG] _generate_with_streamer: Starting generation thread")
+            
             # Check for stop signal before starting generation
             if self.stop_generation:
+                print("[DEBUG] _generate_with_streamer: Stop signal detected before generation")
+                logger.warning("[DEBUG] _generate_with_streamer: Stop signal detected before generation")
                 audio_streamer.end()
                 return
-                
+            
+            print(f"[DEBUG] _generate_with_streamer: Inputs keys: {list(inputs.keys())}")
+            print(f"[DEBUG] _generate_with_streamer: cfg_scale={cfg_scale}, do_sample={do_sample}")
+            print(f"[DEBUG] _generate_with_streamer: audio_streamer={audio_streamer}")
+            logger.info(f"[DEBUG] _generate_with_streamer: Inputs keys: {list(inputs.keys())}")
+            
             # Define a stop check function that can be called from generate
             def check_stop_generation():
+                if self.stop_generation:
+                    print("[DEBUG] check_stop_generation: Stop signal detected")
                 return self.stop_generation
                 
             gen_config = {
@@ -777,6 +848,13 @@ class VibeVoiceDemo:
                 if top_k is not None:
                     gen_config['top_k'] = top_k
             
+            print(f"[DEBUG] _generate_with_streamer: gen_config={gen_config}")
+            print("[DEBUG] _generate_with_streamer: Calling model.generate()...")
+            logger.info("[DEBUG] _generate_with_streamer: Calling model.generate()...")
+            
+            import time
+            start_time = time.time()
+            
             outputs = self.model.generate(
                 **inputs,
                 max_new_tokens=None,
@@ -789,8 +867,19 @@ class VibeVoiceDemo:
                 refresh_negative=refresh_negative,
             )
             
+            elapsed_time = time.time() - start_time
+            print(f"[DEBUG] _generate_with_streamer: model.generate() completed in {elapsed_time:.2f}s")
+            logger.info(f"[DEBUG] _generate_with_streamer: model.generate() completed in {elapsed_time:.2f}s")
+            print(f"[DEBUG] _generate_with_streamer: outputs type: {type(outputs)}")
+            if hasattr(outputs, 'shape'):
+                print(f"[DEBUG] _generate_with_streamer: outputs shape: {outputs.shape}")
+            
+            print("[DEBUG] _generate_with_streamer: Generation completed successfully")
+            logger.info("[DEBUG] _generate_with_streamer: Generation completed successfully")
+            
         except Exception as e:
-            print(f"Error in generation thread: {e}")
+            print(f"[ERROR] Error in generation thread: {e}")
+            logger.error(f"[ERROR] Error in generation thread: {e}", exc_info=True)
             traceback.print_exc()
             # Make sure to end the stream on error
             audio_streamer.end()
