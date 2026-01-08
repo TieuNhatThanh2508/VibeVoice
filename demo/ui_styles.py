@@ -324,17 +324,39 @@ CUSTOM_CSS = """
 THEME_TOGGLE_JS = """
 <script>
 (function() {
+    console.log('[DEBUG] Theme toggle script initializing...');
+    
     // Initialize theme on load
     const savedTheme = localStorage.getItem('vibevoice-theme') || 'light';
+    console.log('[DEBUG] Saved theme from localStorage:', savedTheme);
     document.documentElement.setAttribute('data-theme', savedTheme);
+    console.log('[DEBUG] Set initial data-theme to:', savedTheme);
     
     // Function to toggle theme
     window.toggleVibeVoiceTheme = function(currentTheme) {
+        console.log('[DEBUG] toggleVibeVoiceTheme called with currentTheme:', currentTheme);
+        console.log('[DEBUG] Current data-theme before change:', document.documentElement.getAttribute('data-theme'));
+        
         const newTheme = currentTheme === 'light' ? 'dark' : 'light';
+        console.log('[DEBUG] New theme will be:', newTheme);
+        
         document.documentElement.setAttribute('data-theme', newTheme);
+        console.log('[DEBUG] Set data-theme to:', newTheme);
+        console.log('[DEBUG] Verified data-theme:', document.documentElement.getAttribute('data-theme'));
+        
         localStorage.setItem('vibevoice-theme', newTheme);
+        console.log('[DEBUG] Saved theme to localStorage:', newTheme);
+        
+        // Force CSS variable update check
+        const root = document.documentElement;
+        const bgPrimary = getComputedStyle(root).getPropertyValue('--bg-primary');
+        console.log('[DEBUG] CSS variable --bg-primary after change:', bgPrimary);
+        
         return newTheme;
     };
+    
+    console.log('[DEBUG] toggleVibeVoiceTheme function registered');
+    console.log('[DEBUG] Theme toggle script initialization complete');
 })();
 </script>
 """

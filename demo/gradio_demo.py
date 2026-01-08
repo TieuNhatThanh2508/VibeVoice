@@ -1288,12 +1288,24 @@ def create_demo_interface(demo_instance: VibeVoiceDemo):
             js=f"""
             (theme) => {{
                 console.log('[DEBUG] Theme toggle JS called with theme:', theme);
+                console.log('[DEBUG] Current document.documentElement:', document.documentElement);
+                console.log('[DEBUG] Current data-theme attribute:', document.documentElement.getAttribute('data-theme'));
+                
                 if (window.toggleVibeVoiceTheme) {{
+                    console.log('[DEBUG] Calling toggleVibeVoiceTheme...');
                     const result = window.toggleVibeVoiceTheme(theme);
                     console.log('[DEBUG] toggleVibeVoiceTheme result:', result);
+                    console.log('[DEBUG] New data-theme attribute:', document.documentElement.getAttribute('data-theme'));
+                    
+                    // Force a re-render check
+                    const root = document.documentElement;
+                    const computedStyle = window.getComputedStyle(root);
+                    console.log('[DEBUG] Root computed background:', computedStyle.background);
+                    
                     return [];
                 }} else {{
                     console.error('[DEBUG] toggleVibeVoiceTheme function not found!');
+                    console.error('[DEBUG] Available window functions:', Object.keys(window).filter(k => k.includes('theme') || k.includes('Theme')));
                     return [];
                 }}
             }}
@@ -1306,24 +1318,92 @@ def create_demo_interface(demo_instance: VibeVoiceDemo):
         def toggle_sidebar(visible):
             import logging
             logger = logging.getLogger(__name__)
-            logger.info(f"[DEBUG] toggle_sidebar called with visible: {visible}")
-            print(f"[DEBUG] toggle_sidebar called with visible: {visible}")
+            logger.info(f"[DEBUG] toggle_sidebar called with visible: {visible} (type: {type(visible)})")
+            print(f"[DEBUG] toggle_sidebar called with visible: {visible} (type: {type(visible)})")
             
             new_visible = not visible
             logger.info(f"[DEBUG] toggle_sidebar returning: new_visible={new_visible}")
             print(f"[DEBUG] toggle_sidebar returning: new_visible={new_visible}")
             
-            return gr.update(visible=new_visible), new_visible
+            sidebar_update = gr.update(visible=new_visible)
+            print(f"[DEBUG] sidebar_update object: {sidebar_update}")
+            print(f"[DEBUG] sidebar_update.visible: {getattr(sidebar_update, 'visible', 'N/A')}")
+            
+            return sidebar_update, new_visible
         
         print("[DEBUG] Setting up sidebar_toggle_btn.click handler")
         print(f"[DEBUG] sidebar_toggle_btn: {sidebar_toggle_btn}")
         print(f"[DEBUG] sidebar: {sidebar}")
         print(f"[DEBUG] sidebar_visible: {sidebar_visible}")
+        print(f"[DEBUG] sidebar.elem_id: {getattr(sidebar, 'elem_id', 'N/A')}")
+        print(f"[DEBUG] sidebar.visible: {getattr(sidebar, 'visible', 'N/A')}")
+        
+        # Add JavaScript to help debug sidebar visibility
+        sidebar_js_debug = """
+        <script>
+        console.log('[DEBUG] Sidebar debug script loaded');
+        window.debugSidebar = function() {
+            const sidebar = document.getElementById('sidebar');
+            const sidebarWrapper = document.getElementById('sidebar-wrapper');
+            console.log('[DEBUG] Sidebar element:', sidebar);
+            console.log('[DEBUG] Sidebar wrapper:', sidebarWrapper);
+            if (sidebar) {
+                console.log('[DEBUG] Sidebar computed style:', window.getComputedStyle(sidebar));
+                console.log('[DEBUG] Sidebar display:', window.getComputedStyle(sidebar).display);
+                console.log('[DEBUG] Sidebar visibility:', window.getComputedStyle(sidebar).visibility);
+                console.log('[DEBUG] Sidebar opacity:', window.getComputedStyle(sidebar).opacity);
+                console.log('[DEBUG] Sidebar transform:', window.getComputedStyle(sidebar).transform);
+            }
+            if (sidebarWrapper) {
+                console.log('[DEBUG] Sidebar wrapper display:', window.getComputedStyle(sidebarWrapper).display);
+                console.log('[DEBUG] Sidebar wrapper visibility:', window.getComputedStyle(sidebarWrapper).visibility);
+            }
+        };
+        
+        // Monitor sidebar visibility changes
+        const sidebarObserver = new MutationObserver(function(mutations) {
+            mutations.forEach(function(mutation) {
+                if (mutation.type === 'attributes' && mutation.attributeName === 'style') {
+                    console.log('[DEBUG] Sidebar style changed:', mutation.target.style.cssText);
+                    window.debugSidebar();
+                }
+            });
+        });
+        
+        // Start observing when sidebar is available
+        setTimeout(function() {
+            const sidebar = document.getElementById('sidebar');
+            if (sidebar) {
+                console.log('[DEBUG] Starting to observe sidebar changes');
+                sidebarObserver.observe(sidebar, { attributes: true, attributeFilter: ['style', 'class'] });
+                window.debugSidebar();
+            } else {
+                console.warn('[DEBUG] Sidebar element not found for observation');
+            }
+        }, 1000);
+        </script>
+        """
+        gr.HTML(sidebar_js_debug)
+        
         sidebar_toggle_btn.click(
             fn=toggle_sidebar,
             inputs=[sidebar_visible],
             outputs=[sidebar, sidebar_visible],
             queue=False
+        ).then(
+            fn=None,
+            js="""
+            (sidebarVisible) => {
+                console.log('[DEBUG] Sidebar toggle JS callback called with sidebarVisible:', sidebarVisible);
+                setTimeout(() => {
+                    if (window.debugSidebar) {
+                        window.debugSidebar();
+                    }
+                }, 100);
+                return [];
+            }
+            """,
+            inputs=[sidebar_visible]
         )
         print("[DEBUG] Sidebar toggle handler setup complete")
         
