@@ -52,12 +52,6 @@ class AudioConfig:
     min_silence_len: int = 100  # ms
     keep_silence: int = 50  # ms
     
-    # Speech rate (tốc độ nói)
-    default_speech_rate: float = 1.0  # 1.0 = bình thường, >1.0 = nhanh hơn, <1.0 = chậm hơn
-    speech_rate_min: float = 0.5  # Tối thiểu 0.5x (chậm gấp đôi)
-    speech_rate_max: float = 2.0  # Tối đa 2.0x (nhanh gấp đôi)
-    speech_rate_step: float = 0.1  # Bước tăng/giảm
-    
     def __post_init__(self):
         if self.supported_formats is None:
             self.supported_formats = ['.wav', '.mp3', '.flac', '.ogg', '.m4a', '.aac']
@@ -70,9 +64,6 @@ class UIConfig:
     app_title: str = "VibeVoice AI Podcast Generator"
     tab1_title: str = "Vibe Podcasting"
     tab2_title: str = "Generate Sample Podcast Script"
-    
-    # Speech rate UI label
-    speech_rate_label: str = "Tốc Độ Nói (Speech Rate)"
     
     # Header HTML
     header_title: str = "🎙️ Vibe Podcasting"

@@ -97,23 +97,14 @@ def create_settings_column(voice_manager: VoiceManager, audio_processor) -> tupl
                 maximum=config.model.cfg_scale_max,
                 value=config.model.default_cfg_scale,
                 step=config.model.cfg_scale_step,
-                label="CFG Scale (Classifier-Free Guidance)",
-                info="Điều khiển mức độ tuân thủ text. 1.0 = tự nhiên, >1.3 = tuân thủ tốt hơn nhưng có thể cứng hơn. Mặc định: 1.3"
-            )
-            speech_rate = gr.Slider(
-                minimum=config.audio.speech_rate_min,
-                maximum=config.audio.speech_rate_max,
-                value=config.audio.default_speech_rate,
-                step=config.audio.speech_rate_step,
-                label=config.ui.speech_rate_label,
-                info=f"1.0 = bình thường, >1.0 = nhanh hơn, <1.0 = chậm hơn (Mặc định: {config.audio.default_speech_rate})"
+                label="CFG Scale"
             )
             remove_silence_checkbox = gr.Checkbox(
                 label="Trim Silence from Podcast",
                 value=False
             )
     
-    return num_speakers, speaker_selections, voice_previews, upload_audio, process_upload_btn, cfg_scale, speech_rate, remove_silence_checkbox
+    return num_speakers, speaker_selections, voice_previews, upload_audio, process_upload_btn, cfg_scale, remove_silence_checkbox
 
 
 def create_generation_column() -> tuple:
@@ -209,7 +200,7 @@ def create_demo_interface(generator: PodcastGenerator, voice_manager: VoiceManag
         with gr.Row():
             # Left column - Settings
             with gr.Column(scale=1):
-                num_speakers, speaker_selections, voice_previews, upload_audio, process_upload_btn, cfg_scale, speech_rate, remove_silence_checkbox = create_settings_column(voice_manager, audio_processor)
+                num_speakers, speaker_selections, voice_previews, upload_audio, process_upload_btn, cfg_scale, remove_silence_checkbox = create_settings_column(voice_manager, audio_processor)
             
             # Right column - Generation
             with gr.Column(scale=2):
@@ -422,7 +413,7 @@ def create_demo_interface(generator: PodcastGenerator, voice_manager: VoiceManag
         
         generate_btn.click(
             fn=generator.generate_podcast_with_timestamps,
-            inputs=[num_speakers, script_input] + speaker_selections + [cfg_scale, speech_rate, remove_silence_checkbox],
+            inputs=[num_speakers, script_input] + speaker_selections + [cfg_scale, remove_silence_checkbox],
             outputs=[audio_output, download_file, json_file_output, generate_btn, stop_btn],
         )
         
