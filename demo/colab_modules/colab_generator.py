@@ -84,7 +84,14 @@ class PodcastGenerator:
             Tuple: (audio_path, download_file, json_file, generate_btn_update, stop_btn_update)
         """
         # Initial UI state
-        yield None, None, None, gr.update(visible=False), gr.update(visible=True)
+        try:
+            yield None, None, None, gr.update(visible=False), gr.update(visible=True)
+        except Exception as e:
+            print(f"Error in initial yield: {e}")
+            import traceback
+            traceback.print_exc()
+            yield None, None, None, gr.update(visible=True), gr.update(visible=False)
+            return
         
         final_audio_path, final_json_path = None, None
         
@@ -122,6 +129,8 @@ class PodcastGenerator:
             if not formatted_script_lines:
                 raise gr.Error("Error: Script is empty after formatting.")
             
+            print(f"📝 Formatted script has {len(formatted_script_lines)} lines")
+            
             # Prepare output files
             timestamps = {}
             current_time = 0.0
@@ -130,6 +139,12 @@ class PodcastGenerator:
             base_filename = generate_file_name(formatted_script_lines[0])
             final_audio_path = base_filename + ".wav"
             final_json_path = base_filename + ".json"
+            
+            print(f"🎵 Starting audio generation...")
+            print(f"   Output file: {final_audio_path}")
+            print(f"   CFG Scale: {cfg_scale}")
+            print(f"   Speech Rate: {speech_rate}")
+            print(f"   Remove Silence: {remove_silence}")
             
             # Generate audio for each line
             with sf.SoundFile(
@@ -158,6 +173,8 @@ class PodcastGenerator:
                         continue
                     
                     try:
+                        print(f"   [{i+1}/{len(formatted_script_lines)}] Generating: {text_content[:50]}...")
+                        
                         # Generate audio for this line
                         inputs = self.model_manager.processor(
                             text=[line],
@@ -166,6 +183,7 @@ class PodcastGenerator:
                             return_tensors="pt"
                         )
                         
+                        print(f"      Processing inputs...")
                         output_waveform = self.model_manager.model.generate(
                             **inputs,
                             max_new_tokens=None,
@@ -175,6 +193,7 @@ class PodcastGenerator:
                             verbose=config.model.verbose,
                             refresh_negative=config.model.refresh_negative
                         )
+                        print(f"      Generation complete")
                         
                         if not output_waveform or not output_waveform.speech_outputs or len(output_waveform.speech_outputs) == 0:
                             print(f"Error: No speech output generated for line {i+1}, skipping...")

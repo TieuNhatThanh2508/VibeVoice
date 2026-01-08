@@ -89,7 +89,17 @@ def main(model_path=None, inference_steps=None, debug=False, share=False):
     )
     
     print("🚀 Launching Gradio Demo...")
-    demo.queue().launch(debug=debug, share=share)
+    # Configure queue with longer timeout for generation
+    demo.queue(
+        max_size=10,
+        default_concurrency_limit=1
+    ).launch(
+        debug=debug, 
+        share=share,
+        server_name="0.0.0.0",
+        server_port=7860,
+        show_error=True
+    )
 
 
 @click.command()
