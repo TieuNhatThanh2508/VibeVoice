@@ -129,8 +129,6 @@ class PodcastGenerator:
             if not formatted_script_lines:
                 raise gr.Error("Error: Script is empty after formatting.")
             
-            print(f"📝 Formatted script has {len(formatted_script_lines)} lines")
-            
             # Prepare output files
             timestamps = {}
             current_time = 0.0
@@ -139,12 +137,6 @@ class PodcastGenerator:
             base_filename = generate_file_name(formatted_script_lines[0])
             final_audio_path = base_filename + ".wav"
             final_json_path = base_filename + ".json"
-            
-            print(f"🎵 Starting audio generation...")
-            print(f"   Output file: {final_audio_path}")
-            print(f"   CFG Scale: {cfg_scale}")
-            print(f"   Speech Rate: {speech_rate}")
-            print(f"   Remove Silence: {remove_silence}")
             
             # Generate audio for each line
             with sf.SoundFile(
@@ -173,8 +165,6 @@ class PodcastGenerator:
                         continue
                     
                     try:
-                        print(f"   [{i+1}/{len(formatted_script_lines)}] Generating: {text_content[:50]}...")
-                        
                         # Generate audio for this line
                         inputs = self.model_manager.processor(
                             text=[line],
@@ -183,17 +173,15 @@ class PodcastGenerator:
                             return_tensors="pt"
                         )
                         
-                        print(f"      Processing inputs...")
                         output_waveform = self.model_manager.model.generate(
                             **inputs,
                             max_new_tokens=None,
                             cfg_scale=cfg_scale,
                             tokenizer=self.model_manager.processor.tokenizer,
-                            generation_config=self.model_manager.get_generation_config(),
-                            verbose=config.model.verbose,
-                            refresh_negative=config.model.refresh_negative
+                            generation_config={'do_sample': False},
+                            verbose=False,
+                            refresh_negative=True
                         )
-                        print(f"      Generation complete")
                         
                         if not output_waveform or not output_waveform.speech_outputs or len(output_waveform.speech_outputs) == 0:
                             print(f"Error: No speech output generated for line {i+1}, skipping...")

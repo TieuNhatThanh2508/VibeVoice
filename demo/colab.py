@@ -90,15 +90,20 @@ def main(model_path=None, inference_steps=None, debug=False, share=False):
     
     print("🚀 Launching Gradio Demo...")
     # Configure queue with longer timeout for generation
+    # Note: For long scripts (50+ lines), generation can take 10-30 minutes on CPU
+    print("⚠️  Note: Long scripts may take 10-30 minutes to generate on CPU")
+    print("   Consider testing with shorter scripts first (5-10 lines)")
     demo.queue(
         max_size=10,
-        default_concurrency_limit=1
+        default_concurrency_limit=1,
+        api_open=False
     ).launch(
         debug=debug, 
         share=share,
         server_name="0.0.0.0",
         server_port=7860,
-        show_error=True
+        show_error=True,
+        prevent_thread_lock=True  # Allow server to continue running
     )
 
 
