@@ -28,20 +28,40 @@ from vibevoice.modular.streamer import AudioStreamer
 from transformers.utils import logging
 from transformers import set_seed
 
-# Import configuration
-from .config import (
-    MODEL_CONFIG,
-    MODEL_PATHS,
-    GENERATION_CONFIG,
-    AUDIO_CONFIG,
-    BGM_CONFIG,
-    GRADIO_CONFIG,
-    ADVANCED_CONFIG,
-    get_model_path,
-    get_device,
-    get_torch_dtype,
-    validate_config,
-)
+# Import configuration - support both relative and absolute imports
+try:
+    from .config import (
+        MODEL_CONFIG,
+        MODEL_PATHS,
+        GENERATION_CONFIG,
+        AUDIO_CONFIG,
+        BGM_CONFIG,
+        GRADIO_CONFIG,
+        ADVANCED_CONFIG,
+        get_model_path,
+        get_device,
+        get_torch_dtype,
+        validate_config,
+    )
+except ImportError:
+    # Fallback for when running as script (e.g., in Colab)
+    import sys
+    import os
+    # Add parent directory to path
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from demo.config import (
+        MODEL_CONFIG,
+        MODEL_PATHS,
+        GENERATION_CONFIG,
+        AUDIO_CONFIG,
+        BGM_CONFIG,
+        GRADIO_CONFIG,
+        ADVANCED_CONFIG,
+        get_model_path,
+        get_device,
+        get_torch_dtype,
+        validate_config,
+    )
 
 logging.set_verbosity_info()
 logger = logging.get_logger(__name__)
@@ -1781,7 +1801,7 @@ def main():
         ).launch(
             share=args.share,
             server_port=args.port,
-            server_name=GRADIO_CONFIG["server_name"] if args.share else "127.0.0.1",
+            server_name=GRADIO_CONFIG["server_name"],
             show_error=GRADIO_CONFIG["show_error"],
             show_api=GRADIO_CONFIG["show_api"]
         )

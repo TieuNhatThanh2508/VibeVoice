@@ -113,7 +113,7 @@ BGM_CONFIG = {
 GRADIO_CONFIG = {
     # Server settings
     "port": 7860,
-    "share": False,  # Share publicly via Gradio
+    "share": False,  # Share publicly via Gradio (set to True to create public link by default)
     "server_name": "0.0.0.0",  # Server host (0.0.0.0 for all interfaces)
     "show_error": True,
     "show_api": False,
