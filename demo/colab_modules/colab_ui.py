@@ -73,10 +73,11 @@ def create_settings_column(voice_manager: VoiceManager, audio_processor) -> tupl
                 label=f"🎵 Preview Voice {i+1}",
                 visible=(i < 2),
                 interactive=False,
-                type="filepath",
+                type="filepath",  # Use filepath for direct file loading
                 show_label=True,
                 show_download_button=False,
-                autoplay=False
+                autoplay=False,
+                elem_id=f"preview_audio_{i+1}"  # Add ID for debugging
             )
             voice_previews.append(preview_audio)
         
@@ -239,20 +240,52 @@ def create_demo_interface(generator: PodcastGenerator, voice_manager: VoiceManag
         
         def preview_voice(voice_name):
             """Preview selected voice"""
-            if not voice_name:
-                return None
-            
-            if voice_name not in voice_manager.available_voices:
-                print(f"Warning: Voice '{voice_name}' not found in available voices")
-                return None
-            
-            voice_path = voice_manager.get_voice_path(voice_name)
-            if voice_path and os.path.exists(voice_path):
+            try:
+                if not voice_name:
+                    return None
+                
+                if voice_name not in voice_manager.available_voices:
+                    print(f"Warning: Voice '{voice_name}' not found in available voices")
+                    return None
+                
+                voice_path = voice_manager.get_voice_path(voice_name)
+                if not voice_path:
+                    print(f"Warning: No path found for voice '{voice_name}'")
+                    return None
+                
+                # Normalize path
+                voice_path = os.path.normpath(voice_path)
+                
+                # Convert to absolute path if relative
+                if not os.path.isabs(voice_path):
+                    # Get base directory (demo/)
+                    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                    voice_path = os.path.join(base_dir, voice_path)
+                    voice_path = os.path.normpath(voice_path)
+                
+                if not os.path.exists(voice_path):
+                    print(f"Warning: Voice file not found: {voice_path}")
+                    return None
+                
+                # Verify it's a valid audio file
+                if not os.path.isfile(voice_path):
+                    print(f"Warning: Voice path is not a file: {voice_path}")
+                    return None
+                
+                # Verify file is not empty
+                if os.path.getsize(voice_path) == 0:
+                    print(f"Warning: Voice file is empty: {voice_path}")
+                    return None
+                
                 print(f"Preview voice: {voice_name} -> {voice_path}")
-                return voice_path
-            else:
-                print(f"Warning: Voice file not found: {voice_path}")
-            return None
+                # Return absolute path for Gradio
+                return os.path.abspath(voice_path)
+                
+            except Exception as e:
+                print(f"Error in preview_voice for '{voice_name}': {e}")
+                import traceback
+                traceback.print_exc()
+                return None
         
         def load_random_example():
             """Load random example script"""
@@ -293,10 +326,17 @@ def create_demo_interface(generator: PodcastGenerator, voice_manager: VoiceManag
                     # If visible and has value, load preview
                     try:
                         voice_path = preview_voice(speaker_values[i])
-                        all_updates.append(gr.update(value=voice_path, visible=True))
+                        if voice_path:
+                            all_updates.append(gr.update(value=voice_path, visible=True))
+                        else:
+                            # If preview failed, show empty but visible
+                            all_updates.append(gr.update(value=None, visible=True))
                     except Exception as e:
                         print(f"Error loading preview for speaker {i+1}: {e}")
-                        all_updates.append(gr.update(visible=True))
+                        import traceback
+                        traceback.print_exc()
+                        # Show empty preview instead of error
+                        all_updates.append(gr.update(value=None, visible=True))
                 else:
                     # Hide or clear preview
                     all_updates.append(gr.update(value=None, visible=is_visible))
@@ -312,9 +352,30 @@ def create_demo_interface(generator: PodcastGenerator, voice_manager: VoiceManag
         
         # Connect voice preview for each speaker dropdown
         for speaker_dropdown, preview_audio in zip(speaker_selections, voice_previews):
-            # When dropdown changes, update preview
+            # When dropdown changes, update preview with error handling
+            def make_preview_handler():
+                """Create a preview handler"""
+                def handler(voice_name):
+                    try:
+                        if not voice_name:
+                            return None
+                        
+                        result = preview_voice(voice_name)
+                        # Always return a valid value (None is acceptable for Gradio)
+                        return result
+                    except Exception as e:
+                        print(f"Error in preview handler for '{voice_name}': {e}")
+                        import traceback
+                        traceback.print_exc()
+                        # Return None instead of raising error
+                        return None
+                return handler
+            
+            # Create handler for this specific dropdown
+            handler = make_preview_handler()
+            
             speaker_dropdown.change(
-                fn=preview_voice,
+                fn=handler,
                 inputs=speaker_dropdown,
                 outputs=preview_audio
             )
@@ -325,8 +386,15 @@ def create_demo_interface(generator: PodcastGenerator, voice_manager: VoiceManag
             preview_updates = []
             for i in range(4):
                 if i < 2 and speaker_selections[i].value:  # First 2 speakers are visible by default
-                    voice_path = preview_voice(speaker_selections[i].value)
-                    preview_updates.append(gr.update(value=voice_path))
+                    try:
+                        voice_path = preview_voice(speaker_selections[i].value)
+                        if voice_path:
+                            preview_updates.append(gr.update(value=voice_path))
+                        else:
+                            preview_updates.append(gr.update())
+                    except Exception as e:
+                        print(f"Error loading initial preview for speaker {i+1}: {e}")
+                        preview_updates.append(gr.update())
                 else:
                     preview_updates.append(gr.update())
             return preview_updates
