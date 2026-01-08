@@ -22,7 +22,7 @@ MODEL_CONFIG = {
     
     # Model loading settings
     "torch_dtype": "bfloat16",  # Options: "bfloat16", "float16", "float32"
-    "device_map": "cuda",  # Options: "cuda", "cpu", "auto"
+    "device_map": "auto",  # Options: "cuda", "cpu", "auto" (auto will detect available device)
     "attn_implementation": None,  # Options: None, "flash_attention_2", "sdpa"
     
     # Noise scheduler configuration

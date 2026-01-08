@@ -106,10 +106,20 @@ class VibeVoiceDemo:
         torch_dtype = get_torch_dtype()
         attn_impl = MODEL_CONFIG["attn_implementation"] if MODEL_CONFIG["attn_implementation"] else None
         
+        # Auto-detect device and adjust settings
+        device_map = MODEL_CONFIG["device_map"]
+        if device_map == "cuda" and not torch.cuda.is_available():
+            print("⚠️  CUDA not available, falling back to CPU")
+            device_map = "cpu"
+            # Use float32 for CPU as bfloat16 may not be supported
+            if torch_dtype == torch.bfloat16:
+                torch_dtype = torch.float32
+                print("⚠️  Using float32 instead of bfloat16 for CPU compatibility")
+        
         self.model = VibeVoiceForConditionalGenerationInference.from_pretrained(
             self.model_path,
             torch_dtype=torch_dtype,
-            device_map=MODEL_CONFIG["device_map"],
+            device_map=device_map,
             attn_implementation=attn_impl,
         )
         self.model.eval()
@@ -151,7 +161,7 @@ class VibeVoiceDemo:
         self.model_path = MODEL_PATHS[model_name]
         self.current_model_name = model_name
         
-        # Reload model and processor
+        # Reload model and processor (load_model will handle device detection)
         self.load_model()
         print(f"Successfully switched to model: {model_name}")
     
