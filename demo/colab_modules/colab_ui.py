@@ -227,8 +227,10 @@ def create_demo_interface(generator: PodcastGenerator, voice_manager: VoiceManag
             num_int = int(num)
             updates = []
             for i in range(4):
+                # Update dropdown visibility
                 updates.append(gr.update(visible=(i < num_int)))
-                updates.append(gr.update(visible=(i < num_int)))  # For preview audio
+                # Update preview audio visibility (keep value if already set)
+                updates.append(gr.update(visible=(i < num_int)))
             return updates
         
         def preview_voice(voice_name):
@@ -268,31 +270,57 @@ def create_demo_interface(generator: PodcastGenerator, voice_manager: VoiceManag
                 return random.choice(example_scripts)
             return (2, "Speaker 0: No examples loaded.")
         
+        # Helper function to reload previews after visibility change
+        def reload_previews_after_visibility(*speaker_values):
+            """Reload previews for visible speakers after visibility changes"""
+            preview_updates = []
+            for i, speaker_val in enumerate(speaker_values):
+                if speaker_val:
+                    # If speaker has a value, load preview
+                    voice_path = preview_voice(speaker_val)
+                    preview_updates.append(gr.update(value=voice_path))
+                else:
+                    # Clear preview if no speaker selected
+                    preview_updates.append(gr.update(value=None))
+            return preview_updates
+        
         # Connect events
         num_speakers.change(
             fn=update_speaker_visibility,
             inputs=num_speakers,
             outputs=speaker_selections + voice_previews
+        ).then(
+            fn=reload_previews_after_visibility,
+            inputs=speaker_selections,
+            outputs=voice_previews
         )
         
         # Connect voice preview for each speaker dropdown
-        for idx, (speaker_dropdown, preview_audio) in enumerate(zip(speaker_selections, voice_previews)):
+        for speaker_dropdown, preview_audio in zip(speaker_selections, voice_previews):
             # When dropdown changes, update preview
             speaker_dropdown.change(
                 fn=preview_voice,
                 inputs=speaker_dropdown,
                 outputs=preview_audio
             )
-            
-            # Load initial preview if default value exists and is visible
-            if idx < 2 and speaker_dropdown.value:
-                # Use load event to trigger preview on page load
-                interface.load(
-                    fn=preview_voice,
-                    inputs=speaker_dropdown,
-                    outputs=preview_audio,
-                    queue=False
-                )
+        
+        # Load initial previews on page load
+        def load_initial_previews():
+            """Load initial previews for visible speakers"""
+            preview_updates = []
+            for i in range(4):
+                if i < 2 and speaker_selections[i].value:  # First 2 speakers are visible by default
+                    voice_path = preview_voice(speaker_selections[i].value)
+                    preview_updates.append(gr.update(value=voice_path))
+                else:
+                    preview_updates.append(gr.update())
+            return preview_updates
+        
+        interface.load(
+            fn=load_initial_previews,
+            outputs=voice_previews,
+            queue=False
+        )
         
         process_upload_btn.click(
             fn=process_and_refresh_voices,
