@@ -40,7 +40,7 @@ demo/
 
 **Cách sử dụng**:
 ```python
-from demo.colab_config import config
+from demo.colab_modules import config
 
 # Đọc config
 cfg_scale = config.model.default_cfg_scale

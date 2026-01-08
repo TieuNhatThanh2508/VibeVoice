@@ -6,11 +6,8 @@ import os
 import re
 import shutil
 import uuid
-import sys
 
-# Add parent directory to path for imports
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from demo.colab_config import config
+from demo.colab_modules import config
 
 
 def drive_save(file_copy):
