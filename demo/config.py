@@ -143,8 +143,8 @@ GRADIO_CONFIG = {
     # UI Text
     "script_placeholder": """Enter your podcast script here. You can format it as:
 
-Speaker 0: Welcome to our podcast today!
-Speaker 1: Thanks for having me. I'm excited to discuss...
+Speaker 1: Welcome to our podcast today!
+Speaker 2: Thanks for having me. I'm excited to discuss...
 
 Or paste text directly and it will auto-assign speakers.""",
     

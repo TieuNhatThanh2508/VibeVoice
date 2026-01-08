@@ -28,6 +28,15 @@ from vibevoice.modular.streamer import AudioStreamer
 from transformers.utils import logging
 from transformers import set_seed
 
+# Import local modules
+try:
+    from .ui_styles import CUSTOM_CSS, THEME_TOGGLE_JS
+    from .utils import convert_to_16_bit_wav
+except ImportError:
+    # Fallback for when running as script
+    from ui_styles import CUSTOM_CSS, THEME_TOGGLE_JS
+    from utils import convert_to_16_bit_wav
+
 # Import configuration - support both relative and absolute imports
 try:
     from .config import (
@@ -494,8 +503,8 @@ class VibeVoiceDemo:
                 if line.startswith('Speaker ') and ':' in line:
                     formatted_script_lines.append(line)
                 else:
-                    # Auto-assign to speakers in rotation
-                    speaker_id = len(formatted_script_lines) % num_speakers
+                    # Auto-assign to speakers in rotation (1-based indexing)
+                    speaker_id = (len(formatted_script_lines) % num_speakers) + 1
                     formatted_script_lines.append(f"Speaker {speaker_id}: {line}")
             
             formatted_script = '\n'.join(formatted_script_lines)
@@ -869,256 +878,23 @@ class VibeVoiceDemo:
         if not speakers:
             return 1
         
-        # Return the maximum speaker ID + 1 (assuming 0-based indexing)
-        # or the count of unique speakers if they're 1-based
+        # Return the maximum speaker ID (assuming 1-based indexing)
         max_speaker = max(speakers)
         min_speaker = min(speakers)
         
         if min_speaker == 0:
+            # If script uses 0-based (legacy), convert to 1-based count
             return max_speaker + 1
         else:
-            # Assume 1-based indexing, return the count
-            return len(speakers)
+            # 1-based indexing, return the max speaker ID
+            return max_speaker
     
 
 def create_demo_interface(demo_instance: VibeVoiceDemo):
     """Create the Gradio interface with streaming support."""
     
-    # Custom CSS for high-end aesthetics with lighter theme
-    custom_css = """
-    /* Modern light theme with gradients */
-    .gradio-container {
-        background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
-        font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
-    }
-    
-    /* Header styling */
-    .main-header {
-        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-        padding: 2rem;
-        border-radius: 20px;
-        margin-bottom: 2rem;
-        text-align: center;
-        box-shadow: 0 10px 40px rgba(102, 126, 234, 0.3);
-    }
-    
-    .main-header h1 {
-        color: white;
-        font-size: 2.5rem;
-        font-weight: 700;
-        margin: 0;
-        text-shadow: 0 2px 4px rgba(0,0,0,0.3);
-    }
-    
-    .main-header p {
-        color: rgba(255,255,255,0.9);
-        font-size: 1.1rem;
-        margin: 0.5rem 0 0 0;
-    }
-    
-    /* Card styling */
-    .settings-card, .generation-card {
-        background: rgba(255, 255, 255, 0.8);
-        backdrop-filter: blur(10px);
-        border: 1px solid rgba(226, 232, 240, 0.8);
-        border-radius: 16px;
-        padding: 1.5rem;
-        margin-bottom: 1rem;
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-    }
-    
-    /* Speaker selection styling */
-    .speaker-grid {
-        display: grid;
-        gap: 1rem;
-        margin-bottom: 1rem;
-    }
-    
-    .speaker-item {
-        background: linear-gradient(135deg, #e2e8f0 0%, #cbd5e1 100%);
-        border: 1px solid rgba(148, 163, 184, 0.4);
-        border-radius: 12px;
-        padding: 1rem;
-        color: #374151;
-        font-weight: 500;
-    }
-    
-    /* Streaming indicator */
-    .streaming-indicator {
-        display: inline-block;
-        width: 10px;
-        height: 10px;
-        background: #22c55e;
-        border-radius: 50%;
-        margin-right: 8px;
-        animation: pulse 1.5s infinite;
-    }
-    
-    @keyframes pulse {
-        0% { opacity: 1; transform: scale(1); }
-        50% { opacity: 0.5; transform: scale(1.1); }
-        100% { opacity: 1; transform: scale(1); }
-    }
-    
-    /* Queue status styling */
-    .queue-status {
-        background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
-        border: 1px solid rgba(14, 165, 233, 0.3);
-        border-radius: 8px;
-        padding: 0.75rem;
-        margin: 0.5rem 0;
-        text-align: center;
-        font-size: 0.9rem;
-        color: #0369a1;
-    }
-    
-    .generate-btn {
-        background: linear-gradient(135deg, #059669 0%, #0d9488 100%);
-        border: none;
-        border-radius: 12px;
-        padding: 1rem 2rem;
-        color: white;
-        font-weight: 600;
-        font-size: 1.1rem;
-        box-shadow: 0 4px 20px rgba(5, 150, 105, 0.4);
-        transition: all 0.3s ease;
-    }
-    
-    .generate-btn:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 6px 25px rgba(5, 150, 105, 0.6);
-    }
-    
-    .stop-btn {
-        background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
-        border: none;
-        border-radius: 12px;
-        padding: 1rem 2rem;
-        color: white;
-        font-weight: 600;
-        font-size: 1.1rem;
-        box-shadow: 0 4px 20px rgba(239, 68, 68, 0.4);
-        transition: all 0.3s ease;
-    }
-    
-    .stop-btn:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 6px 25px rgba(239, 68, 68, 0.6);
-    }
-    
-    /* Audio player styling */
-    .audio-output {
-        background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%);
-        border-radius: 16px;
-        padding: 1.5rem;
-        border: 1px solid rgba(148, 163, 184, 0.3);
-    }
-    
-    .complete-audio-section {
-        margin-top: 1rem;
-        padding: 1rem;
-        background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
-        border: 1px solid rgba(34, 197, 94, 0.3);
-        border-radius: 12px;
-    }
-    
-    /* Text areas */
-    .script-input, .log-output {
-        background: rgba(255, 255, 255, 0.9) !important;
-        border: 1px solid rgba(148, 163, 184, 0.4) !important;
-        border-radius: 12px !important;
-        color: #1e293b !important;
-        font-family: 'JetBrains Mono', monospace !important;
-    }
-    
-    .script-input::placeholder {
-        color: #64748b !important;
-    }
-    
-    /* Sliders */
-    .slider-container {
-        background: rgba(248, 250, 252, 0.8);
-        border: 1px solid rgba(226, 232, 240, 0.6);
-        border-radius: 8px;
-        padding: 1rem;
-        margin: 0.5rem 0;
-    }
-    
-    /* Labels and text */
-    .gradio-container label {
-        color: #374151 !important;
-        font-weight: 600 !important;
-    }
-    
-    .gradio-container .markdown {
-        color: #1f2937 !important;
-    }
-    
-    /* Responsive design */
-    @media (max-width: 768px) {
-        .main-header h1 { font-size: 2rem; }
-        .settings-card, .generation-card { padding: 1rem; }
-    }
-    
-    /* Random example button styling - more subtle professional color */
-    .random-btn {
-        background: linear-gradient(135deg, #64748b 0%, #475569 100%);
-        border: none;
-        border-radius: 12px;
-        padding: 1rem 1.5rem;
-        color: white;
-        font-weight: 600;
-        font-size: 1rem;
-        box-shadow: 0 4px 20px rgba(100, 116, 139, 0.3);
-        transition: all 0.3s ease;
-        display: inline-flex;
-        align-items: center;
-        gap: 0.5rem;
-    }
-    
-    .random-btn:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 6px 25px rgba(100, 116, 139, 0.4);
-        background: linear-gradient(135deg, #475569 0%, #334155 100%);
-    }
-    
-    /* Sidebar styling */
-    .sidebar-container {
-        background: rgba(255, 255, 255, 0.95);
-        backdrop-filter: blur(10px);
-        border-right: 1px solid rgba(226, 232, 240, 0.8);
-        border-radius: 0 16px 16px 0;
-        padding: 1.5rem;
-        box-shadow: 2px 0 10px rgba(0, 0, 0, 0.1);
-        transition: all 0.3s ease;
-        max-height: calc(100vh - 200px);
-        overflow-y: auto;
-    }
-    
-    .sidebar-toggle-btn {
-        background: linear-gradient(135deg, #64748b 0%, #475569 100%);
-        border: none;
-        border-radius: 8px 0 0 8px;
-        padding: 0.75rem 1rem;
-        color: white;
-        font-weight: 600;
-        font-size: 0.9rem;
-        box-shadow: 2px 0 10px rgba(100, 116, 139, 0.3);
-        transition: all 0.3s ease;
-        position: sticky;
-        top: 0;
-        z-index: 10;
-    }
-    
-    .sidebar-toggle-btn:hover {
-        background: linear-gradient(135deg, #475569 0%, #334155 100%);
-        transform: translateX(-2px);
-    }
-    
-    .main-content-area {
-        padding: 1rem;
-    }
-    """
+    # Use CSS from ui_styles module
+    custom_css = CUSTOM_CSS
     
     with gr.Blocks(
         title="VibeVoice - AI Podcast Generator",
@@ -1130,6 +906,19 @@ def create_demo_interface(demo_instance: VibeVoiceDemo):
         )
     ) as interface:
         
+        # Theme toggle button
+        theme_state = gr.State(value="light")
+        theme_toggle_btn = gr.Button(
+            "🌙",
+            elem_classes="theme-toggle-btn",
+            size="sm"
+        )
+        theme_toggle_btn = gr.Button(
+            "🌙",
+            elem_classes="theme-toggle-btn",
+            size="sm"
+        )
+        
         # Header
         gr.HTML("""
         <div class="main-header">
@@ -1138,7 +927,13 @@ def create_demo_interface(demo_instance: VibeVoiceDemo):
         </div>
         """)
         
+        # JavaScript for theme toggle (from ui_styles module)
+        gr.HTML(THEME_TOGGLE_JS)
+        
         # Main layout with sidebar
+        # Container for sidebar overlay
+        sidebar_container = gr.HTML("", visible=False, elem_id="sidebar-wrapper")
+        
         with gr.Row():
             # Sidebar toggle button (fixed position)
             sidebar_visible = gr.State(value=False)
@@ -1148,8 +943,8 @@ def create_demo_interface(demo_instance: VibeVoiceDemo):
                 size="sm"
             )
             
-            # Sidebar with advanced settings
-            with gr.Column(scale=1, visible=False, elem_classes="sidebar-container") as sidebar:
+            # Sidebar with advanced settings - full height overlay
+            with gr.Column(scale=1, visible=False, elem_classes="sidebar-container", elem_id="sidebar") as sidebar:
                 gr.Markdown("### ⚙️ **Advanced Settings**")
                 
                 # Speech Rate
@@ -1447,6 +1242,24 @@ def create_demo_interface(demo_instance: VibeVoiceDemo):
                 )
         
         # Sidebar toggle function
+        # Theme toggle function
+        def toggle_theme(current_theme):
+            new_theme = "dark" if current_theme == "light" else "light"
+            icon = "☀️" if new_theme == "dark" else "🌙"
+            return gr.update(value=icon), new_theme
+        
+        theme_toggle_btn.click(
+            fn=toggle_theme,
+            inputs=[theme_state],
+            outputs=[theme_toggle_btn, theme_state],
+            queue=False
+        ).then(
+            fn=None,
+            js="(theme) => { window.toggleVibeVoiceTheme(theme); return []; }",
+            inputs=[theme_state]
+        )
+        
+        # Sidebar toggle function
         def toggle_sidebar(visible):
             return gr.update(visible=not visible), not visible
         
@@ -1654,7 +1467,7 @@ def create_demo_interface(demo_instance: VibeVoiceDemo):
             else:
                 # Fallback to default
                 example_scripts = [
-                    [2, "Speaker 0: Welcome to our AI podcast demonstration!\nSpeaker 1: Thanks for having me. This is exciting!"]
+                    [2, "Speaker 1: Welcome to our AI podcast demonstration!\nSpeaker 2: Thanks for having me. This is exciting!"]
                 ]
             
             # Randomly select one
@@ -1709,21 +1522,7 @@ def create_demo_interface(demo_instance: VibeVoiceDemo):
     return interface
 
 
-def convert_to_16_bit_wav(data):
-    # Check if data is a tensor and move to cpu
-    if torch.is_tensor(data):
-        data = data.detach().cpu().numpy()
-    
-    # Ensure data is numpy array
-    data = np.array(data)
-
-    # Normalize to range [-1, 1] if it's not already
-    if np.max(np.abs(data)) > 1.0:
-        data = data / np.max(np.abs(data))
-    
-    # Scale to 16-bit integer range
-    data = (data * 32767).astype(np.int16)
-    return data
+# convert_to_16_bit_wav is now imported from utils module
 
 
 def parse_args():
