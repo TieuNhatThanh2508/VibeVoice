@@ -225,13 +225,17 @@ def create_demo_interface(generator: PodcastGenerator, voice_manager: VoiceManag
         def update_speaker_visibility(num):
             """Update speaker visibility based on number"""
             num_int = int(num)
-            updates = []
+            dropdown_updates = []
+            preview_updates = []
+            
             for i in range(4):
+                is_visible = (i < num_int)
                 # Update dropdown visibility
-                updates.append(gr.update(visible=(i < num_int)))
-                # Update preview audio visibility (keep value if already set)
-                updates.append(gr.update(visible=(i < num_int)))
-            return updates
+                dropdown_updates.append(gr.update(visible=is_visible))
+                # Update preview audio visibility
+                preview_updates.append(gr.update(visible=is_visible))
+            
+            return dropdown_updates + preview_updates
         
         def preview_voice(voice_name):
             """Preview selected voice"""
@@ -270,29 +274,40 @@ def create_demo_interface(generator: PodcastGenerator, voice_manager: VoiceManag
                 return random.choice(example_scripts)
             return (2, "Speaker 0: No examples loaded.")
         
-        # Helper function to reload previews after visibility change
-        def reload_previews_after_visibility(*speaker_values):
-            """Reload previews for visible speakers after visibility changes"""
-            preview_updates = []
-            for i, speaker_val in enumerate(speaker_values):
-                if speaker_val:
-                    # If speaker has a value, load preview
-                    voice_path = preview_voice(speaker_val)
-                    preview_updates.append(gr.update(value=voice_path))
+        # Combined function to update visibility and reload previews
+        def update_speakers_and_previews(num, speaker1, speaker2, speaker3, speaker4):
+            """Update speaker visibility and reload previews in one go"""
+            num_int = int(num)
+            speaker_values = [speaker1, speaker2, speaker3, speaker4]
+            all_updates = []
+            
+            # First update dropdown visibility
+            for i in range(4):
+                is_visible = (i < num_int)
+                all_updates.append(gr.update(visible=is_visible))
+            
+            # Then update preview visibility and values
+            for i in range(4):
+                is_visible = (i < num_int)
+                if is_visible and speaker_values[i]:
+                    # If visible and has value, load preview
+                    try:
+                        voice_path = preview_voice(speaker_values[i])
+                        all_updates.append(gr.update(value=voice_path, visible=True))
+                    except Exception as e:
+                        print(f"Error loading preview for speaker {i+1}: {e}")
+                        all_updates.append(gr.update(visible=True))
                 else:
-                    # Clear preview if no speaker selected
-                    preview_updates.append(gr.update(value=None))
-            return preview_updates
+                    # Hide or clear preview
+                    all_updates.append(gr.update(value=None, visible=is_visible))
+            
+            return all_updates
         
         # Connect events
         num_speakers.change(
-            fn=update_speaker_visibility,
-            inputs=num_speakers,
+            fn=update_speakers_and_previews,
+            inputs=[num_speakers] + speaker_selections,
             outputs=speaker_selections + voice_previews
-        ).then(
-            fn=reload_previews_after_visibility,
-            inputs=speaker_selections,
-            outputs=voice_previews
         )
         
         # Connect voice preview for each speaker dropdown
